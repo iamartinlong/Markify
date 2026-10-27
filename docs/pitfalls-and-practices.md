@@ -282,14 +282,15 @@ protected override async void OnClosing(WindowClosingEventArgs e)
 
 ---
 
-### B6. 给 `TextEditor` 设 Padding 会让行号栏一起内缩
+### B6. 给 `TextEditor` 设 Padding 会让行号栏上下都内缩
 
 **现象** 🔬 实测
 
-编辑器底部的行号分隔线**提前 8px 断掉**，露出一小截"没有线也没有内容"的空白。像素测量：
+编辑区顶部和底部的行号分隔线都**提前断掉**，露出"没有线也没有内容"的空白。像素测量：
 
 ```
-分隔线结束 y=756   编辑区白底结束 y=764    → 差 8px
+底部：分隔线结束 y=756   编辑区底边 y=764    → 差 8px
+顶部：编辑区顶边 y=108   分隔线起点 y=116    → 差 8px
 ```
 
 **根因**
@@ -298,24 +299,31 @@ protected override async void OnClosing(WindowClosingEventArgs e)
 <ae:TextEditor Padding="8,8,0,8" />
 ```
 
-`TextEditor` 的 `Padding` 会内缩**整个编辑器内容**，行号栏（`LineNumberMargin`）是编辑器的一部分，所以它也跟着少掉底部 8px，无法贴合编辑区下边缘。
+`TextEditor` 的 `Padding` 会内缩**整个编辑器内容**，行号栏（`LineNumberMargin`）是编辑器的一部分，所以它也跟着少掉顶部和底部各 8px，无法贴合编辑区上下边缘。
 
 **尝试过但无效的做法**：把 `Padding` 移到外层 `Border` 上——Border 的 padding 同样内缩整个子元素，问题一模一样。**换宿主不改变"内缩对象"这一事实。**
 
 **解法**
 
-如果有背景色需求，把"内容留白"和"颜色铺满"分开：
-
 ```xml
-<!-- Padding 只给内容用；Bottom 设 0，让行号槽贴底 -->
-<ae:TextEditor Padding="8,8,0,0" Background="Transparent" />
+<!-- 只保留左边距给正文留白；上/下/右归零，让行号槽贴合上下边缘 -->
+<ae:TextEditor Padding="8,0,0,0" Background="Transparent" />
 ```
 
-修复后实测：分隔线 `y=764`，与编辑区底边**完全对齐**。
+修复后实测：
 
-**取舍说明**：去掉底部 padding 后，最后一行文字会稍微贴近底部（滚动到底时）。若想要"留白但线不断"，需要给 `TextView` 加自定义背景渲染器，或改用外层容器只给文字加 padding——本项目选简单方案，因为 8px 的视觉收益不值得引入自定义渲染。
+| 项目 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 分隔线距顶 | 8px | **0px** |
+| 分隔线距底 | 8px | **0px** |
+| 行号 1 文字距顶 | 12px | **4px**（AvaloniaEdit 自身行高留白） |
 
-**排查手法**：行号/滚动条的"断口"类问题，量三个 y 值就能定位——**线终点 / 内容区终点 / 容器终点**。差值等于某处 padding 或 margin 时，就是内缩导致的。
+**取舍说明**：去掉上下 padding 后，首行文字和最后一行文字会更贴近边缘。若想要"留白但线不断"，需要给 `TextView` 加自定义背景渲染器——本项目选简单方案。
+
+**排查手法**：行号/滚动条的"断口"类问题，量三个值就能定位——**线起点 / 内容区起点 / 容器起点**，以及底部的对应三值。差值等于某处 padding 或 margin 时，就是内缩导致的。**顶部和底部要分别检查**，同一个 `Padding` 的上下分量会各自造成一处断口（本项目就是先修了底部、后才发现顶部）。
+
+**推广**：`Padding` 的四分量是独立的，修完一个边不代表其他边没问题。改 `Padding` 时应当把四个边**逐一对照设计意图**确认。
+
 
 ---
 
@@ -934,7 +942,7 @@ assert($current -eq 'Sentinel.TestHandler')
 | 事件没触发 | 在回调里先写一行日志到文件（WinExe 无控制台，`Console` 不可见） |
 | 布局不生效 | 检查是不是只改了 `IsVisible` 而没改 Grid 轨道；确认有"初始应用"入口 |
 | 底部/右侧多出固定宽度空白 | 某个 `Height=0` 的轨道仍带 `MinHeight>0`，Grid 会按最小尺寸撑开（B3） |
-| 行号/滚动条线提前断开 | 量「线终点 / 内容区终点 / 容器终点」，差值是 padding 或 margin（B6） |
+| 行号/滚动条线提前断开 | 量「线起点 / 内容区起点 / 容器起点」（上下各测一次），差值是 padding 或 margin（B6） |
 | 内容被滚动条/浮层压住 | 调容器 padding 无效（会连滚动条一起移）；改内容层 margin（B7） |
 | 滚动不同步 | 分别打印两侧的 `Offset / Extent / Viewport`，先确认 ratio 不是恒 0 |
 | AOT 崩溃 | 先手工跑 `--selftest`；再确认 `Assembly.Location` 是否为空（是否真 AOT） |
