@@ -29,6 +29,7 @@
         <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+P" Command="{Binding TogglePreviewCommand}" />
+        <KeyBinding Gesture="Ctrl+F" Command="{Binding FindCommand}" />
     </Window.KeyBindings>
 
     <DockPanel>
@@ -42,6 +43,10 @@
                 <MenuItem Header="另存为…" Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S" />
                 <Separator />
                 <MenuItem Header="退出" Click="OnExitClick" />
+            </MenuItem>
+            <MenuItem Header="编辑(_E)">
+                <MenuItem Header="查找…" Command="{Binding FindCommand}" InputGesture="Ctrl+F" />
+                <MenuItem Header="查找并替换…" Click="OnReplaceClick" InputGesture="Ctrl+H" />
             </MenuItem>
             <MenuItem Header="视图(_V)">
                 <MenuItem Header="显示预览" ToggleType="CheckBox" IsChecked="{Binding IsPreviewVisible}" />

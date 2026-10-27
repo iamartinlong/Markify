@@ -42,6 +42,7 @@ dotnet run -- ..\..\samples\demo.md
 | --- | --- |
 | `Ctrl+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` | 新建 / 打开 / 保存 / 另存为 |
 | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` / `` Ctrl+` `` | 加粗 / 斜体 / 链接 / 行内代码 |
+| `Ctrl+F` / `Ctrl+H` | 查找 / 查找并替换（编辑器内） |
 | `Ctrl+Shift+P` | 显示/隐藏预览 |
 
 ## 项目结构
@@ -112,10 +113,22 @@ CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提�
 
 开发中实际踩的坑与排查手法（滚动同步、AOT、安装包、文件关联等 20+ 条），见 [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md)。
 
+## 测试
+
+```powershell
+dotnet build tests/Markify.Tests
+dotnet run --project tests/Markify.Tests
+```
+
+46 个单元测试，覆盖大纲锚点生成、中英文混排字数统计、文件编码/BOM 往返、外部修改监听（防抖与自身写入抑制）。
+
+> 注意：xunit.v3 使用 Microsoft.Testing.Platform 作为宿主。.NET 10 的 `dotnet test` 对 MTP 的集成尚不稳定（会报「运行了零个测试」），因此用 `dotnet run --project` 运行，CI 亦如此。
+
 ## 已知限制
 
 - 滚动同步当前为「按比例」，超长文档中源码行与预览内容会有轻微漂移（大纲导航可精确跳转）
 - 暂不支持多标签页、导出 PDF/HTML、所见即所得模式
+- 替换功能依赖 AvaloniaEdit 的 SearchPanel，仅在源码编辑区生效（预览区暂不支持查找）
 
 ## NativeAOT
 

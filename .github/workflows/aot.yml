@@ -22,6 +22,17 @@ jobs:
       - name: Build
         run: dotnet build src/Markify -c Release --nologo
 
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          # xunit.v3 用 Microsoft.Testing.Platform 自身作为宿主；.NET 10 的 dotnet test
+          # 对 MTP 的集成尚不稳定（会报 "运行了零个测试"），因此直接运行测试程序。
+          dotnet build tests/Markify.Tests -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw "test project failed to build" }
+
+          dotnet run --project tests/Markify.Tests -c Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw "unit tests failed ($LASTEXITCODE)" }
+
       - name: Self-test (JIT)
         shell: pwsh
         run: |

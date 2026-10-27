@@ -92,6 +92,8 @@ public partial class MainWindow : Window, IDocumentDialogService
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _viewModel.DocumentLoaded -= OnDocumentLoaded;
             _viewModel.HeadingNavigationRequested -= OnHeadingNavigationRequested;
+            _viewModel.FindRequested -= OnFindRequested;
+            _viewModel.ExternalChangePromptRequested -= OnExternalChangePromptRequested;
         }
 
         _viewModel = DataContext as MainViewModel;
@@ -102,6 +104,8 @@ public partial class MainWindow : Window, IDocumentDialogService
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.DocumentLoaded += OnDocumentLoaded;
         _viewModel.HeadingNavigationRequested += OnHeadingNavigationRequested;
+        _viewModel.FindRequested += OnFindRequested;
+        _viewModel.ExternalChangePromptRequested += OnExternalChangePromptRequested;
 
         if (!string.IsNullOrEmpty(_viewModel.SourceText))
             SetEditorText(_viewModel.SourceText);
@@ -128,6 +132,64 @@ public partial class MainWindow : Window, IDocumentDialogService
     }
 
     private void OnHeadingNavigationRequested(object? sender, MarkdownHeading heading) => NavigateToHeading(heading);
+
+    private void OnFindRequested(object? sender, EventArgs e)
+    {
+        Editor.TextArea.Focus();
+        ShowSearchPanel();
+    }
+
+    /// <summary>外部修改确认对话框。返回 true 表示用户选择重新加载。</summary>
+    private Task<bool> OnExternalChangePromptRequested() => ConfirmReloadAsync();
+
+    private Task<bool> ConfirmReloadAsync()
+    {
+        var tcs = new TaskCompletionSource<bool>();
+
+        var dialog = new Window
+        {
+            Title = "文件已被外部修改",
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+
+        var name = _viewModel?.DocumentName ?? "文档";
+        var message = new TextBlock
+        {
+            Text = $"「{name}」已被其他程序修改，是否重新加载？\n\n" +
+                   "选择「重新加载」将丢弃当前未保存的修改。",
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 16),
+        };
+
+        var reload = new Button { Content = "重新加载", MinWidth = 96 };
+        var keep = new Button { Content = "保留当前内容", MinWidth = 96, IsCancel = true };
+
+        reload.Click += (_, _) => { tcs.TrySetResult(true); dialog.Close(); };
+        keep.Click += (_, _) => { tcs.TrySetResult(false); dialog.Close(); };
+        dialog.Closed += (_, _) => tcs.TrySetResult(false);
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Children =
+            {
+                message,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Spacing = 8,
+                    Children = { reload, keep },
+                },
+            },
+        };
+
+        dialog.ShowDialog(this);
+        return tcs.Task;
+    }
 
     /// <summary>把编辑器滚动到标题所在行，并把预览滚到同名锚点。</summary>
     private void NavigateToHeading(MarkdownHeading heading)
@@ -273,6 +335,24 @@ public partial class MainWindow : Window, IDocumentDialogService
 
     private void OnEditorKeyDown(object? sender, KeyEventArgs e)
     {
+        // Ctrl+F：打开编辑器内置的查找面板。
+        // AvaloniaEdit 虽然通过 SearchPanel.Install 绑定了 ApplicationCommands.Find，
+        // 但命令需要从 TextArea 内部路由；窗口级快捷键会先被拦下，因此显式处理。
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.F)
+        {
+            ShowSearchPanel(replaceMode: false);
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+H：查找并替换
+        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.H)
+        {
+            ShowSearchPanel(replaceMode: true);
+            e.Handled = true;
+            return;
+        }
+
         if (e.KeyModifiers != KeyModifiers.Control)
             return;
 
@@ -297,6 +377,21 @@ public partial class MainWindow : Window, IDocumentDialogService
         }
     }
 
+    /// <summary>打开（或重新聚焦）编辑器查找面板。</summary>
+    private void ShowSearchPanel(bool replaceMode = false)
+    {
+        // SearchPanel 由 TextEditor.OnApplyTemplate 安装；模板未应用时才可能为 null。
+        var panel = Editor.SearchPanel;
+        if (panel is null)
+            return;
+
+        if (panel.IsClosed)
+            panel.Open();
+
+        panel.IsReplaceMode = replaceMode;
+        panel.Reactivate();   // 聚焦输入框并全选，便于直接覆盖上次的搜索词
+    }
+
     /// <summary>用前后缀包裹选区；无选区时插入占位文本并选中它。</summary>
     private void WrapSelection(string prefix, string suffix, string placeholder)
     {
@@ -318,7 +413,11 @@ public partial class MainWindow : Window, IDocumentDialogService
     }
 
     private void OnBoldClick(object? sender, RoutedEventArgs e) => WrapSelection("**", "**", "粗体文本");
-    private void OnItalicClick(object? sender, RoutedEventArgs e) => WrapSelection("*", "*", "斜体文本");
+    private void OnReplaceClick(object? sender, RoutedEventArgs e)
+    {
+        Editor.TextArea.Focus();
+        ShowSearchPanel(replaceMode: true);
+    }    private void OnItalicClick(object? sender, RoutedEventArgs e) => WrapSelection("*", "*", "斜体文本");
     private void OnLinkClick(object? sender, RoutedEventArgs e) => WrapSelection("[", "](https://)", "链接文字");
     private void OnCodeClick(object? sender, RoutedEventArgs e) => WrapSelection("`", "`", "code");
 
@@ -573,6 +672,9 @@ public partial class MainWindow : Window, IDocumentDialogService
             Dispatcher.UIThread.Post(Close);
             return;
         }
+
+        // 停止文件监听，避免退出后仍有事件回调进入已销毁的 UI。
+        _viewModel?.StopWatching();
 
         base.OnClosing(e);
     }

@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Markify.Tests</RootNamespace>
+    <AssemblyName>Markify.Tests</AssemblyName>
+    <OutputType>Exe</OutputType>
+    <!-- xunit.v3 自带 Microsoft.Testing.Platform 宿主，不需要 Microsoft.NET.Test.Sdk。 -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" Version="4.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 引用主项目以便测试内部服务；内部成员通过 InternalsVisibleTo 开放。 -->
+    <ProjectReference Include="..\..\src\Markify\Markify.csproj" />
+  </ItemGroup>
+</Project>

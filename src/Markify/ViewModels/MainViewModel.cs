@@ -17,11 +17,13 @@ namespace Markify.ViewModels;
 public partial class MainViewModel : ObservableObject
 {
     private readonly DocumentFileService _files = new();
+    private readonly FileChangeWatcher _watcher = new();
     private readonly DispatcherTimer _previewTimer;
 
     private Encoding _encoding = new UTF8Encoding(false);
     private string _lastSavedText = string.Empty;
     private bool _suppressModified;
+    private bool _externalPromptOpen;
 
     public MainViewModel()
     {
@@ -32,12 +34,19 @@ public partial class MainViewModel : ObservableObject
             FlushPreview();
         };
 
+        // 外部修改事件在 ThreadPool 上触发，必须切回 UI 线程再动状态。
+        _watcher.ExternalChangeDetected += (_, _) =>
+            Dispatcher.UIThread.Post(() => _ = HandleExternalChangeAsync());
+
         PreviewMarkdown = SourceText = WelcomeDocument;
         _lastSavedText = WelcomeDocument;
         RecalculateStatistics(SourceText);
         StatusMessage = "就绪";
         RefreshOutline(SourceText);
     }
+
+    /// <summary>请求询问用户是否重新加载被外部修改的文档。由视图弹窗，返回 true 表示重载。</summary>
+    public event Func<Task<bool>>? ExternalChangePromptRequested;
 
     public IDocumentDialogService? Dialogs { get; set; }
 
@@ -181,6 +190,12 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ToggleOutline() => IsOutlineVisible = !IsOutlineVisible;
 
+    /// <summary>请求打开编辑器查找面板。实际 UI 操作由视图完成（VM 不持有控件）。</summary>
+    public event EventHandler? FindRequested;
+
+    [RelayCommand]
+    private void Find() => FindRequested?.Invoke(this, EventArgs.Empty);
+
     private void RecalculateStatistics(string text)
     {
         CharCount = text.Length;
@@ -295,6 +310,10 @@ public partial class MainViewModel : ObservableObject
             IsModified = false;
             RecalculateStatistics(text);
             RefreshOutline(text);
+
+            // 跟随当前文档切换监听目标；新建（path == null）时停止监听。
+            _watcher.Watch(path);
+
             DocumentLoaded?.Invoke(this, EventArgs.Empty);
         }
         finally
@@ -335,17 +354,73 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
-            await _files.WriteAsync(path, SourceText, _encoding);
+            // 抑制自身保存触发的文件监听事件，否则每次保存都会误报"文件被外部修改"。
+            using (_watcher.SuppressOwnWrite())
+            {
+                await _files.WriteAsync(path, SourceText, _encoding);
+            }
+
+            var pathChanged = !string.Equals(FilePath, path, StringComparison.OrdinalIgnoreCase);
             FilePath = path;
             _lastSavedText = SourceText;
             IsModified = false;
             StatusMessage = $"已保存 {Path.GetFileName(path)}";
+
+            // 另存为会换文件，需要重新监听新路径。
+            if (pathChanged)
+                _watcher.Watch(path);
         }
         catch (Exception ex)
         {
             StatusMessage = $"保存失败：{ex.Message}";
         }
     }
+
+    /// <summary>处理检测到的外部修改：询问用户是否重载。</summary>
+    private async Task HandleExternalChangeAsync()
+    {
+        if (string.IsNullOrEmpty(FilePath) || ExternalChangePromptRequested is null)
+            return;
+
+        // 多个文件事件可能引发重入（实测连续两次外部写入会弹出两个对话框）。
+        // 已有提示正在显示时忽略新的通知。
+        if (_externalPromptOpen)
+            return;
+
+        _externalPromptOpen = true;
+        try
+        {
+            // 磁盘上的内容与上次保存的一致，说明只是时间戳变化（例如编辑器统一 format），
+            // 没必要打扰用户。
+            var (diskText, encoding) = await _files.ReadAsync(FilePath);
+            if (string.Equals(diskText, _lastSavedText, StringComparison.Ordinal))
+            {
+                StatusMessage = "文件在磁盘上被更新（内容无变化）";
+                return;
+            }
+
+            var reload = await ExternalChangePromptRequested();
+            if (!reload)
+            {
+                StatusMessage = "已忽略外部修改";
+                return;
+            }
+
+            ApplyDocument(diskText, FilePath, encoding);
+            StatusMessage = "已重新加载外部修改";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"检测外部修改失败：{ex.Message}";
+        }
+        finally
+        {
+            _externalPromptOpen = false;
+        }
+    }
+
+    /// <summary>停止文件监听（应用退出前调用）。</summary>
+    public void StopWatching() => _watcher.Dispose();
 
     public async Task<bool> ConfirmDiscardAsync()
     {
