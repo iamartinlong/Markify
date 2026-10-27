@@ -24,12 +24,16 @@
     </Window.Resources>
 
     <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+T" Command="{Binding NewDocumentCommand}" />
         <KeyBinding Gesture="Ctrl+N" Command="{Binding NewDocumentCommand}" />
         <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenDocumentCommand}" />
         <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+P" Command="{Binding TogglePreviewCommand}" />
         <KeyBinding Gesture="Ctrl+F" Command="{Binding FindCommand}" />
+        <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseTabCommand}" />
+        <KeyBinding Gesture="Ctrl+Tab" Command="{Binding NextTabCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+Tab" Command="{Binding PreviousTabCommand}" />
     </Window.KeyBindings>
 
     <DockPanel>
@@ -79,6 +83,39 @@
             </StackPanel>
         </Border>
 
+        <!-- 标签栏：每个文档一个标签，关闭按钮在标签上 -->
+        <Border DockPanel.Dock="Top" Classes="chrome" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ChromeBorder}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding Documents}" Margin="6,4,6,0">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:DocumentViewModel">
+                            <Border Classes="tab" Classes.active="{Binding IsActive}"
+                                    CornerRadius="4,4,0,0">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <Button Classes="tab-title"
+                                            Content="{Binding TabTitle}"
+                                            Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ActivateDocumentCommand}"
+                                            CommandParameter="{Binding}" />
+                                    <Button Classes="tab-close"
+                                            Content="✕"
+                                            ToolTip.Tip="关闭标签 (Ctrl+W)"
+                                            Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseTabCommand}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
         <!-- 状态栏 -->
         <Border DockPanel.Dock="Bottom" Classes="chrome statusbar">
             <Grid ColumnDefinitions="*,Auto">
@@ -86,9 +123,9 @@
                            TextTrimming="CharacterEllipsis" />
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16">
                     <TextBlock Text="{Binding CaretDisplay}" />
-                    <TextBlock Text="{Binding WordCount, StringFormat='字数 {0}'}" />
-                    <TextBlock Text="{Binding CharCount, StringFormat='字符 {0}'}" />
-                    <TextBlock Text="{Binding EncodingName}" />
+                    <TextBlock Text="{Binding ActiveDocument.WordCount, StringFormat='字数 {0}'}" />
+                    <TextBlock Text="{Binding ActiveDocument.CharCount, StringFormat='字符 {0}'}" />
+                    <TextBlock Text="{Binding ActiveDocument.EncodingName}" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -105,8 +142,8 @@
                     <TextBlock DockPanel.Dock="Top" Text="大纲" Margin="12,10,12,6"
                                FontWeight="SemiBold" Opacity="0.75" />
                     <ListBox x:Name="OutlineList"
-                             ItemsSource="{Binding Outline}"
-                             SelectedItem="{Binding SelectedHeading}"
+                             ItemsSource="{Binding ActiveDocument.Outline}"
+                             SelectedItem="{Binding ActiveDocument.SelectedHeading}"
                              Background="Transparent"
                              BorderThickness="0">
                         <ListBox.ItemTemplate>
@@ -156,7 +193,7 @@
                         Padding="24,16,0,16"
                         IsVisible="{Binding IsPreviewVisible}">
                     <mv:MarkdownViewer x:Name="Preview"
-                                       Markdown="{Binding PreviewMarkdown}"
+                                       Markdown="{Binding ActiveDocument.PreviewMarkdown}"
                                        IsLazyRenderingEnabled="True"
                                        IsSmoothScrollingEnabled="True"
                                        ShowCodeBlockLanguage="True"

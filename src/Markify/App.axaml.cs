@@ -36,7 +36,7 @@ public partial class App : Application
                                                      && DocumentFormats.IsSupported(a));
 
             if (initial is not null && window.DataContext is MainViewModel vm)
-                window.Opened += async (_, _) => await vm.LoadAsync(Path.GetFullPath(initial));
+                window.Opened += async (_, _) => await vm.OpenPathAsync(Path.GetFullPath(initial));
 
             // CI 用：--selftest 时在真实原生二进制里做冒烟验证，然后按结果退出。
             if (SelfTest.Requested)

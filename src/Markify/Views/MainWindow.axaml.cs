@@ -13,6 +13,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
+using AvaloniaEdit.Document;
 using AvaloniaEdit.TextMate;
 using Markify.Services;
 using Markify.ViewModels;
@@ -31,8 +32,10 @@ public partial class MainWindow : Window, IDocumentDialogService
     private bool _syncingScroll;
     private bool _restoringPreviewScroll;
     private bool _navigating;
+    private bool _suppressEditorEvents;
     private double _lastEditorRatio;
     private MainViewModel? _viewModel;
+    private DocumentViewModel? _attachedDocument;
 
     public MainWindow()
     {
@@ -90,10 +93,10 @@ public partial class MainWindow : Window, IDocumentDialogService
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
-            _viewModel.DocumentLoaded -= OnDocumentLoaded;
-            _viewModel.HeadingNavigationRequested -= OnHeadingNavigationRequested;
+            _viewModel.ActiveDocumentChanged -= OnActiveDocumentChanged;
             _viewModel.FindRequested -= OnFindRequested;
             _viewModel.ExternalChangePromptRequested -= OnExternalChangePromptRequested;
+            _viewModel.DiscardPromptRequested -= OnDiscardPromptRequested;
         }
 
         _viewModel = DataContext as MainViewModel;
@@ -102,36 +105,87 @@ public partial class MainWindow : Window, IDocumentDialogService
 
         _viewModel.Dialogs = this;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        _viewModel.DocumentLoaded += OnDocumentLoaded;
-        _viewModel.HeadingNavigationRequested += OnHeadingNavigationRequested;
+        _viewModel.ActiveDocumentChanged += OnActiveDocumentChanged;
         _viewModel.FindRequested += OnFindRequested;
         _viewModel.ExternalChangePromptRequested += OnExternalChangePromptRequested;
+        _viewModel.DiscardPromptRequested += OnDiscardPromptRequested;
 
-        if (!string.IsNullOrEmpty(_viewModel.SourceText))
-            SetEditorText(_viewModel.SourceText);
+        // 初始文档或后续切换标签都走同一条路径。
+        AttachActiveDocument(_viewModel.ActiveDocument);
     }
 
-    private void OnDocumentLoaded(object? sender, EventArgs e)
-    {
-        if (_viewModel is null)
-            return;
+    /// <summary>
+    /// 绑定活动文档：把编辑器的 Document 换成该文档自己的 TextDocument。
+    /// 只换文档不重建编辑器——每个 TextEditor 都要装一套 TextMate，按标签建控件开销明显。
+    /// </summary>
+    private void OnActiveDocumentChanged(object? sender, DocumentViewModel? doc) => AttachActiveDocument(doc);
 
-        SetEditorText(_viewModel.SourceText);
-        Editor.CaretOffset = 0;
-        Editor.ScrollToHome();
+    private void AttachActiveDocument(DocumentViewModel? doc)
+    {
+        // 切走前记住旧文档的光标与滚动位置
+        if (_attachedDocument is not null && !ReferenceEquals(_attachedDocument, doc))
+        {
+            _attachedDocument.SavedCaretOffset = Editor.CaretOffset;
+            _attachedDocument.SavedVerticalOffset = Editor.VerticalOffset;
+            _attachedDocument.PropertyChanged -= OnActiveDocumentPropertyChanged;
+        }
+
+        _attachedDocument = doc;
+
+        if (doc is null)
+        {
+            Editor.Document = new TextDocument();
+            return;
+        }
+
+        _suppressEditorEvents = true;
+        try
+        {
+            if (!ReferenceEquals(Editor.Document, doc.Document))
+                Editor.Document = doc.Document;
+
+            Editor.CaretOffset = Math.Clamp(doc.SavedCaretOffset, 0, Math.Max(0, doc.Document.TextLength));
+        }
+        finally
+        {
+            _suppressEditorEvents = false;
+        }
+
+        doc.PropertyChanged += OnActiveDocumentPropertyChanged;
+
+        // 恢复滚动位置要等布局完成
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (doc.SavedVerticalOffset > 0)
+                Editor.ScrollToVerticalOffset(doc.SavedVerticalOffset);
+            else
+                Editor.ScrollToHome();
+
+            Editor.TextArea.Focus();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void OnActiveDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // 大纲选中项变化时同步滚动编辑器与预览
+        if (e.PropertyName == nameof(DocumentViewModel.SelectedHeading)
+            && sender is DocumentViewModel doc
+            && ReferenceEquals(doc, _attachedDocument)
+            && doc.SelectedHeading is { } heading)
+        {
+            NavigateToHeading(heading);
+        }
     }
 
     // ---------- 大纲导航 ----------
 
     private void OnOutlineSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (_viewModel is null || OutlineList.SelectedItem is not MarkdownHeading heading)
+        if (OutlineList.SelectedItem is not MarkdownHeading heading)
             return;
 
         NavigateToHeading(heading);
     }
-
-    private void OnHeadingNavigationRequested(object? sender, MarkdownHeading heading) => NavigateToHeading(heading);
 
     private void OnFindRequested(object? sender, EventArgs e)
     {
@@ -140,9 +194,15 @@ public partial class MainWindow : Window, IDocumentDialogService
     }
 
     /// <summary>外部修改确认对话框。返回 true 表示用户选择重新加载。</summary>
-    private Task<bool> OnExternalChangePromptRequested() => ConfirmReloadAsync();
+    private Task<bool> OnExternalChangePromptRequested(string documentName) => ConfirmReloadAsync(documentName);
 
-    private Task<bool> ConfirmReloadAsync()
+    /// <summary>未保存修改的确认框（关闭标签用）。</summary>
+    private Task<bool> OnDiscardPromptRequested() =>
+        _viewModel?.ActiveDocument is { } doc
+            ? ConfirmDiscardAsync(doc.DocumentName)
+            : Task.FromResult(true);
+
+    private Task<bool> ConfirmReloadAsync(string documentName)
     {
         var tcs = new TaskCompletionSource<bool>();
 
@@ -155,10 +215,9 @@ public partial class MainWindow : Window, IDocumentDialogService
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
 
-        var name = _viewModel?.DocumentName ?? "文档";
         var message = new TextBlock
         {
-            Text = $"「{name}」已被其他程序修改，是否重新加载？\n\n" +
+            Text = $"「{documentName}」已被其他程序修改，是否重新加载？\n\n" +
                    "选择「重新加载」将丢弃当前未保存的修改。",
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 16),
@@ -214,29 +273,12 @@ public partial class MainWindow : Window, IDocumentDialogService
         }
     }
 
-    private void SetEditorText(string text)
-    {
-        if (Editor.Text == text)
-            return;
-
-        Editor.Text = text;
-        Editor.Document.UndoStack.ClearAll();
-        Editor.Document.UndoStack.MarkAsOriginalFile();
-    }
-
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.IsDarkTheme):
                 ApplyEditorTheme(_viewModel?.IsDarkTheme == true);
-                break;
-            case nameof(MainViewModel.IsWordWrap):
-            case nameof(MainViewModel.ShowLineNumbers):
-                break;
-            case nameof(MainViewModel.PreviewMarkdown):
-                // MarkdownViewer 重新渲染会把滚动位置归零，稍后恢复。
-                _restoringPreviewScroll = true;
                 break;
         }
 
@@ -324,13 +366,22 @@ public partial class MainWindow : Window, IDocumentDialogService
 
     private void OnEditorTextChanged(object? sender, EventArgs e)
     {
-        _viewModel?.OnEditorTextChanged(Editor.Text);
+        if (_suppressEditorEvents)
+            return;
+
+        _attachedDocument?.OnTextChanged(Editor.Text);
+        if (_attachedDocument is not null)
+        {
+            // TextDocument 是文档自己的，撤销栈天然隔离；
+            // 这里同步一次脏标记（TextDocument 的变化不一定经过 OnTextChanged 的所有路径）。
+            _attachedDocument.IsModified = !_attachedDocument.Document.UndoStack.IsOriginalFile;
+        }
     }
 
     private void OnCaretPositionChanged(object? sender, EventArgs e)
     {
         var caret = Editor.TextArea.Caret;
-        _viewModel?.OnCaretChanged(caret.Line, caret.Column, Editor.SelectionLength);
+        _attachedDocument?.OnCaretChanged(caret.Line, caret.Column, Editor.SelectionLength);
     }
 
     private void OnEditorKeyDown(object? sender, KeyEventArgs e)
@@ -650,10 +701,8 @@ public partial class MainWindow : Window, IDocumentDialogService
             return;
 
         e.Handled = true;
-        if (!await _viewModel.ConfirmDiscardAsync())
-            return;
-
-        await _viewModel.LoadAsync(path);
+        // 拖放打开为新标签，不影响当前文档，因此无需确认丢弃。
+        await _viewModel.OpenPathAsync(path);
     }
 
     // ---------- 关闭确认 ----------
@@ -662,19 +711,16 @@ public partial class MainWindow : Window, IDocumentDialogService
 
     protected override async void OnClosing(WindowClosingEventArgs e)
     {
-        if (_viewModel is { IsModified: true } vm)
+        if (_viewModel is { } vm)
         {
-            e.Cancel = true;
-            if (!await vm.ConfirmDiscardAsync())
+            if (!await vm.ConfirmCloseAllAsync())
+            {
+                e.Cancel = true;
                 return;
+            }
 
-            vm.IsModified = false;
-            Dispatcher.UIThread.Post(Close);
-            return;
+            vm.DisposeDocuments();
         }
-
-        // 停止文件监听，避免退出后仍有事件回调进入已销毁的 UI。
-        _viewModel?.StopWatching();
 
         base.OnClosing(e);
     }

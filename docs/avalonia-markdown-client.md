@@ -284,8 +284,10 @@ partial void OnIsDarkThemeChanged(bool value)
 
 按「投入产出比」排序：
 
-1. **多标签页 / 工作区**（1–2 天）
-   把 `MainViewModel` 拆成 `DocumentViewModel` + `WorkspaceViewModel`，`TabControl` 绑定集合。注意每篇文档要有独立的 `TextDocument`（共享会串撤销栈）。
+1. ✅ **多标签页 / 工作区**（已完成）
+   已按 `MainViewModel`（工作区）+ `DocumentViewModel`（文档）拆分。每篇文档持有独立 `TextDocument`，撤销栈天然隔离。
+   **关键取舍**：视图侧只保留一个 `TextEditor`，切换标签时替换其 `Document`，而不是每个标签建一个编辑器——每个 `TextEditor` 都要装一套 TextMate 语法与 transformer，标签多时开销明显。
+   代价：标签间共享语法高亮配置与查找面板状态（已记入 README 已知限制）。
 
 2. **导出 HTML / PDF**（2–3 天）
    - HTML：`Markdig` 转 HTML + 内嵌 CSS 模板，一行 `File.WriteAllText`。零依赖，最容易。
@@ -294,11 +296,11 @@ partial void OnIsDarkThemeChanged(bool value)
 3. **精确滚动同步**（3–5 天）
    目前是比例同步。要做「行级」精确同步，需要在渲染后遍历预览控件树，记录每个 block 的 `Bounds.Y`，建立「源码行 → Y」的分段线性映射。MarkView 的 `MarkdownViewer` 没直接暴露 block 边界，可行路径是：拿 Markdig AST 的 `Block.Line` + 遍历可视树里带 `markdown-*` style class 的控件，按顺序配对。难度中等，收益是长文档体验明显提升。
 
-4. **文件监听 + 外部修改提示**（半天）
-   `FileSystemWatcher` 监听当前文件，变更时提示「文件已被外部修改，是否重新加载」。编辑器和外部工具并用的场景很常见。
+4. ✅ **文件监听 + 外部修改提示**（已完成）
+   `FileChangeWatcher` 封装 `FileSystemWatcher`，处理了两个让它真正可用的细节：防抖（一次保存会触发多个事件）与自身写入抑制（否则应用保存时自己会提示"被外部修改"）。事件在 ThreadPool 上触发，已切回 UI 线程。
 
-5. **搜索替换**（1 天）
-   AvaloniaEdit 自带 `SearchPanel`（`Editor.SearchPanel`），Ctrl+F 基本开箱即用；预览侧用 `MarkdownViewer.Find(...)`。
+5. ✅ **查找替换**（已完成）
+   直接复用 AvaloniaEdit 内置 `SearchPanel`。注意 `Ctrl+F` 需显式处理：`ApplicationCommands.Find` 从 `TextArea` 内部路由，窗口级快捷键拦不到（实测按了没反应）。
 
 6. **WYSIWYG 模式**（评估后决定）
    如果确实要做，路线是：升级到 `Avalonia.Controls.Markdown` + `RichTextEditor`（Pro 授权），复用其共享的 `FlowDocument` 模型。**不要**自己拿 AvaloniaEdit 硬做富文本——那条路上没有可用的文档模型底座。

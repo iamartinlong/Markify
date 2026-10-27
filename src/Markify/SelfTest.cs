@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -178,7 +178,7 @@ public static class SelfTest
         Check("word-count-cjk", () =>
         {
             // 中文按字计、英文按词计：'你好 world' => 2 + 1
-            var count = ViewModels.MainViewModel.CountWords("你好 world");
+            var count = ViewModels.DocumentViewModel.CountWords("你好 world");
             if (count != 3) throw new InvalidOperationException($"expected 3, got {count}");
             return $"count={count}";
         });

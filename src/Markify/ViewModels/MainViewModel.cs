@@ -1,72 +1,64 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Styling;
-using Avalonia.Threading;
+using Markify.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Markify.Services;
 
 namespace Markify.ViewModels;
 
+/// <summary>
+/// 工作区：管理多个文档标签、全局视图选项与文档无关的命令。
+///
+/// 拆分动机：原先把"文档状态"和"应用级设置"混在一起，导致切标签要整体重建状态。
+/// 现在文档相关的一切在 <see cref="DocumentViewModel"/>，这里只管集合与外壳。
+/// </summary>
 public partial class MainViewModel : ObservableObject
 {
     private readonly DocumentFileService _files = new();
-    private readonly FileChangeWatcher _watcher = new();
-    private readonly DispatcherTimer _previewTimer;
 
-    private Encoding _encoding = new UTF8Encoding(false);
-    private string _lastSavedText = string.Empty;
-    private bool _suppressModified;
-    private bool _externalPromptOpen;
+    /// <summary>新建但尚未保存的文档计数，用于生成「未命名 N.md」。</summary>
+    private int _untitledCount;
 
     public MainViewModel()
     {
-        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
-        _previewTimer.Tick += (_, _) =>
+        Documents.CollectionChanged += (_, _) =>
         {
-            _previewTimer.Stop();
-            FlushPreview();
+            OnPropertyChanged(nameof(HasDocuments));
+            OnPropertyChanged(nameof(CanCloseTab));
         };
 
-        // 外部修改事件在 ThreadPool 上触发，必须切回 UI 线程再动状态。
-        _watcher.ExternalChangeDetected += (_, _) =>
-            Dispatcher.UIThread.Post(() => _ = HandleExternalChangeAsync());
-
-        PreviewMarkdown = SourceText = WelcomeDocument;
-        _lastSavedText = WelcomeDocument;
-        RecalculateStatistics(SourceText);
-        StatusMessage = "就绪";
-        RefreshOutline(SourceText);
+        // 启动时给一个示例文档，避免空白窗口。
+        _untitledCount = 1;
+        var first = CreateDocument(WelcomeDocument, null, new UTF8Encoding(false), "未命名.md");
+        Documents.Add(first);
+        ActiveDocument = first;
     }
 
-    /// <summary>请求询问用户是否重新加载被外部修改的文档。由视图弹窗，返回 true 表示重载。</summary>
-    public event Func<Task<bool>>? ExternalChangePromptRequested;
+    public ObservableCollection<DocumentViewModel> Documents { get; } = [];
+
+    /// <summary>询问用户是否放弃某个文档的未保存修改。</summary>
+    public event Func<Task<bool>>? DiscardPromptRequested;
+
+    /// <summary>外部修改确认：参数是文档名。</summary>
+    public event Func<string, Task<bool>>? ExternalChangePromptRequested;
+
+    /// <summary>请求打开编辑器查找面板。</summary>
+    public event EventHandler? FindRequested;
+
+    /// <summary>活动文档切换后触发，视图据此把编辑器的 Document 换掉。</summary>
+    public event EventHandler<DocumentViewModel?>? ActiveDocumentChanged;
 
     public IDocumentDialogService? Dialogs { get; set; }
 
-    /// <summary>打开/新建文档后触发，视图据此把内容推入编辑器并复位光标。</summary>
-    public event EventHandler? DocumentLoaded;
-
-    /// <summary>大纲点击后触发，视图把编辑器与预览跳到对应标题。</summary>
-    public event EventHandler<MarkdownHeading>? HeadingNavigationRequested;
-
     [ObservableProperty]
-    public partial string SourceText { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string PreviewMarkdown { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string? FilePath { get; set; }
-
-    [ObservableProperty]
-    public partial bool IsModified { get; set; }
+    public partial DocumentViewModel? ActiveDocument { get; set; }
 
     [ObservableProperty]
     public partial bool IsWordWrap { get; set; }
@@ -84,205 +76,128 @@ public partial class MainViewModel : ObservableObject
     public partial bool IsDarkTheme { get; set; }
 
     [ObservableProperty]
-    public partial int CaretLine { get; set; } = 1;
-
-    [ObservableProperty]
-    public partial int CaretColumn { get; set; } = 1;
-
-    [ObservableProperty]
-    public partial int SelectionLength { get; set; }
-
-    [ObservableProperty]
-    public partial int WordCount { get; set; }
-
-    [ObservableProperty]
-    public partial int CharCount { get; set; }
-
-    [ObservableProperty]
-    public partial string StatusMessage { get; set; } = string.Empty;
-
-    [ObservableProperty]
-    public partial string EncodingName { get; set; } = "UTF-8";
-
-    /// <summary>由源码解析出的标题大纲，供侧栏导航使用。</summary>
-    public ObservableCollection<MarkdownHeading> Outline { get; } = [];
+    public partial string StatusMessage { get; set; } = "就绪";
 
     [ObservableProperty]
     public partial bool IsOutlineVisible { get; set; }
 
-    [ObservableProperty]
-    public partial MarkdownHeading? SelectedHeading { get; set; }
+    public bool HasDocuments => Documents.Count > 0;
 
-    public string DocumentName =>
-        string.IsNullOrEmpty(FilePath) ? "未命名.md" : Path.GetFileName(FilePath);
+    public bool CanCloseTab => Documents.Count > 1;
 
-    public string WindowTitle =>
-        $"{DocumentName}{(IsModified ? " *" : string.Empty)} — Markify";
-
-    public string CaretDisplay => $"行 {CaretLine}, 列 {CaretColumn}";
-
-    // ---------- 编辑流程 ----------
-
-    /// <summary>编辑器每次文本变化都调用；写入 SourceText 并启动预览防抖。</summary>
-    public void OnEditorTextChanged(string text)
+    /// <summary>标题栏：活动文档名 + 修改标记。</summary>
+    public string WindowTitle
     {
-        SourceText = text;
-        if (!_suppressModified)
-            IsModified = !string.Equals(text, _lastSavedText, StringComparison.Ordinal);
-
-        RecalculateStatistics(text);
-        _previewTimer.Stop();
-        _previewTimer.Start();
-    }
-
-    public void OnCaretChanged(int line, int column, int selectionLength)
-    {
-        CaretLine = line;
-        CaretColumn = column;
-        SelectionLength = selectionLength;
-    }
-
-    private void FlushPreview()
-    {
-        if (!string.Equals(PreviewMarkdown, SourceText, StringComparison.Ordinal))
-            PreviewMarkdown = SourceText;
-
-        RefreshOutline(SourceText);
-    }
-
-    private void RefreshOutline(string text)
-    {
-        var headings = MarkdownOutline.Parse(text);
-
-        // 仅在标题集合真正变化时重建，避免每次输入都刷新侧栏。
-        if (headings.Count == Outline.Count)
+        get
         {
-            var same = true;
-            for (var i = 0; i < headings.Count; i++)
-            {
-                if (!string.Equals(headings[i].Text, Outline[i].Text, StringComparison.Ordinal)
-                    || headings[i].Level != Outline[i].Level
-                    || headings[i].Line != Outline[i].Line)
-                {
-                    same = false;
-                    break;
-                }
-            }
+            var name = ActiveDocument?.DocumentName ?? "无文档";
+            var dirty = ActiveDocument?.IsModified == true ? " *" : string.Empty;
+            return $"{name}{dirty} — Markify";
+        }
+    }
 
-            if (same)
-                return;
+    /// <summary>状态栏光标位置。</summary>
+    public string CaretDisplay => ActiveDocument?.CaretDisplay ?? "行 -, 列 -";
+
+    partial void OnActiveDocumentChanged(DocumentViewModel? oldValue, DocumentViewModel? newValue)
+    {
+        if (oldValue is not null)
+        {
+            oldValue.PropertyChanged -= OnActiveDocumentPropertyChanged;
+            oldValue.IsActive = false;
+            // 切走前把未完成的预览刷新，避免防抖回调在切走后落到别的文档上。
+            oldValue.CommitPendingPreview();
         }
 
-        Outline.Clear();
-        foreach (var heading in headings)
-            Outline.Add(heading);
-    }
-
-    [RelayCommand]
-    private void NavigateToHeading(MarkdownHeading? heading)
-    {
-        if (heading is null)
-            return;
-
-        HeadingNavigationRequested?.Invoke(this, heading);
-    }
-
-    [RelayCommand]
-    private void ToggleOutline() => IsOutlineVisible = !IsOutlineVisible;
-
-    /// <summary>请求打开编辑器查找面板。实际 UI 操作由视图完成（VM 不持有控件）。</summary>
-    public event EventHandler? FindRequested;
-
-    [RelayCommand]
-    private void Find() => FindRequested?.Invoke(this, EventArgs.Empty);
-
-    private void RecalculateStatistics(string text)
-    {
-        CharCount = text.Length;
-        WordCount = CountWords(text);
-    }
-
-    /// <summary>统计词数：CJK 按字计，拉丁文字按空白/标点分词。</summary>
-    internal static int CountWords(string text)
-    {
-        var words = 0;
-        var inLatinWord = false;
-        foreach (var ch in text)
+        if (newValue is not null)
         {
-            // CJK 统一表意文字与扩展区、假名、谚文：每个字符视作一个词。
-            if (ch is >= '\u3040' and <= '\u30FF' or >= '\u3400' and <= '\u4DBF' or >= '\u4E00' and <= '\u9FFF'
-                or >= '\uF900' and <= '\uFAFF' or >= '\uAC00' and <= '\uD7AF')
-            {
-                words++;
-                inLatinWord = false;
-                continue;
-            }
-
-            if (char.IsLetterOrDigit(ch) || ch == '_' || ch == '\'')
-            {
-                if (!inLatinWord)
-                {
-                    words++;
-                    inLatinWord = true;
-                }
-            }
-            else
-            {
-                inLatinWord = false;
-            }
+            newValue.PropertyChanged += OnActiveDocumentPropertyChanged;
+            newValue.ExternalChangePrompt = PromptExternalChangeAsync;
+            newValue.IsActive = true;
         }
 
-        return words;
-    }
-
-    partial void OnIsModifiedChanged(bool value)
-    {
         OnPropertyChanged(nameof(WindowTitle));
+        OnPropertyChanged(nameof(CaretDisplay));
+        ActiveDocumentChanged?.Invoke(this, newValue);
     }
 
-    partial void OnFilePathChanged(string? value)
+    private void OnActiveDocumentPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        OnPropertyChanged(nameof(DocumentName));
-        OnPropertyChanged(nameof(WindowTitle));
-    }
-
-    partial void OnCaretLineChanged(int value) => OnPropertyChanged(nameof(CaretDisplay));
-
-    partial void OnCaretColumnChanged(int value) => OnPropertyChanged(nameof(CaretDisplay));
-
-    // ---------- 命令 ----------
-
-    [RelayCommand]
-    private async Task NewDocumentAsync()
-    {
-        if (!await ConfirmDiscardAsync())
+        // 只有活动文档的状态变化才需要反映到窗口外壳上。
+        if (!ReferenceEquals(sender, ActiveDocument))
             return;
 
-        ApplyDocument(string.Empty, null, new UTF8Encoding(false));
-        StatusMessage = "已新建文档";
+        switch (e.PropertyName)
+        {
+            case nameof(DocumentViewModel.IsModified):
+            case nameof(DocumentViewModel.FilePath):
+                OnPropertyChanged(nameof(WindowTitle));
+                break;
+            case nameof(DocumentViewModel.CaretLine):
+            case nameof(DocumentViewModel.CaretColumn):
+                OnPropertyChanged(nameof(CaretDisplay));
+                break;
+        }
+    }
+
+    private DocumentViewModel CreateDocument(string text, string? path, Encoding encoding,
+                                             string? untitledName = null)
+    {
+        var doc = new DocumentViewModel(_files, text, path, encoding, untitledName);
+        doc.ExternalChangePrompt = PromptExternalChangeAsync;
+        return doc;
+    }
+
+    // ---------- 标签操作 ----------
+
+    [RelayCommand]
+    private void NewDocument()
+    {
+        // 首个文档用「未命名.md」，之后递增，避免标签栏里一排同名标签无法区分。
+        _untitledCount++;
+        var name = _untitledCount == 1 ? "未命名.md" : $"未命名 {_untitledCount}.md";
+        var doc = CreateDocument(string.Empty, null, new UTF8Encoding(false), name);
+        Documents.Add(doc);
+        ActiveDocument = doc;
+        StatusMessage = $"已新建文档（共 {Documents.Count} 个标签）";
     }
 
     [RelayCommand]
     private async Task OpenDocumentAsync()
     {
-        if (Dialogs is null || !await ConfirmDiscardAsync())
+        if (Dialogs is null)
             return;
 
         var path = await Dialogs.PickOpenFileAsync();
         if (path is null)
             return;
 
-        await LoadAsync(path);
+        await OpenPathAsync(path);
     }
 
-    public async Task LoadAsync(string path)
+    /// <summary>打开文件：若已打开则切到该标签，否则新建标签。</summary>
+    public async Task OpenPathAsync(string path)
     {
+        var full = Path.GetFullPath(path);
+
+        var existing = Documents.FirstOrDefault(d =>
+            d.FilePath is not null && string.Equals(Path.GetFullPath(d.FilePath), full, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is not null)
+        {
+            ActiveDocument = existing;
+            StatusMessage = $"已切换到 {existing.DocumentName}";
+            return;
+        }
+
         try
         {
             StatusMessage = $"正在打开 {Path.GetFileName(path)}…";
-            var (text, encoding) = await _files.ReadAsync(path);
-            ApplyDocument(text, path, encoding);
-            StatusMessage = $"已打开 {Path.GetFileName(path)}（{EncodingName}）";
+            var (text, encoding) = await _files.ReadAsync(full);
+            var doc = CreateDocument(text, full, encoding);
+            Documents.Add(doc);
+            ActiveDocument = doc;
+            StatusMessage = $"已打开 {doc.DocumentName}（{doc.EncodingName}）";
         }
         catch (Exception ex)
         {
@@ -290,145 +205,169 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private void ApplyDocument(string text, string? path, Encoding encoding)
+    [RelayCommand]
+    private async Task CloseTabAsync(DocumentViewModel? doc)
     {
-        _suppressModified = true;
-        try
+        doc ??= ActiveDocument;
+        if (doc is null)
+            return;
+
+        if (Documents.Count == 1)
         {
-            FilePath = path;
-            _encoding = encoding;
-            EncodingName = encoding.WebName.ToUpperInvariant() switch
-            {
-                "UTF-8" => encoding.GetPreamble().Length > 0 ? "UTF-8 BOM" : "UTF-8",
-                "UTF-16" => "UTF-16 LE",
-                var other => other,
-            };
-
-            _lastSavedText = text;
-            SourceText = text;
-            PreviewMarkdown = text;
-            IsModified = false;
-            RecalculateStatistics(text);
-            RefreshOutline(text);
-
-            // 跟随当前文档切换监听目标；新建（path == null）时停止监听。
-            _watcher.Watch(path);
-
-            DocumentLoaded?.Invoke(this, EventArgs.Empty);
+            // 最后一个标签：清空内容而不是关闭窗口，行为更可预期。
+            StatusMessage = "已保留最后一个标签（无法关闭全部）";
+            return;
         }
-        finally
-        {
-            _suppressModified = false;
-        }
+
+        if (doc.IsModified && !await ConfirmDiscardAsync(doc))
+            return;
+
+        CloseDocumentCore(doc);
     }
+
+    private void CloseDocumentCore(DocumentViewModel doc)
+    {
+        var index = Documents.IndexOf(doc);
+        if (index < 0)
+            return;
+
+        Documents.Remove(doc);
+
+        if (ReferenceEquals(ActiveDocument, doc))
+        {
+            // 关掉当前标签后优先选右边的，没有就选左边的。
+            var next = index < Documents.Count ? Documents[index] : Documents[^1];
+            ActiveDocument = next;
+        }
+
+        doc.Dispose();
+        StatusMessage = $"已关闭 {doc.DocumentName}（剩余 {Documents.Count} 个）";
+        OnPropertyChanged(nameof(CanCloseTab));
+    }
+
+    [RelayCommand]
+    private void NextTab() => CycleTab(1);
+
+    [RelayCommand]
+    private void PreviousTab() => CycleTab(-1);
+
+    private void CycleTab(int delta)
+    {
+        if (Documents.Count <= 1 || ActiveDocument is null)
+            return;
+
+        var index = Documents.IndexOf(ActiveDocument);
+        if (index < 0)
+            return;
+
+        var next = (index + delta + Documents.Count) % Documents.Count;
+        ActiveDocument = Documents[next];
+    }
+
+    /// <summary>直接选择标签（标签栏点击用）。</summary>
+    [RelayCommand]
+    private void ActivateDocument(DocumentViewModel? doc)
+    {
+        if (doc is not null)
+            ActiveDocument = doc;
+    }
+
+    // ---------- 保存 ----------
 
     [RelayCommand]
     private async Task SaveAsync()
     {
-        if (string.IsNullOrEmpty(FilePath))
+        if (ActiveDocument is not { } doc)
+            return;
+
+        if (string.IsNullOrEmpty(doc.FilePath))
         {
             await SaveAsAsync();
             return;
         }
 
-        await SaveToAsync(FilePath);
+        await SaveDocumentAsync(doc);
     }
 
     [RelayCommand]
     private async Task SaveAsAsync()
     {
-        if (Dialogs is null)
+        if (Dialogs is null || ActiveDocument is not { } doc)
             return;
 
-        var path = await Dialogs.PickSaveFileAsync(FilePath);
+        var path = await Dialogs.PickSaveFileAsync(doc.FilePath);
         if (path is null)
             return;
 
         if (string.IsNullOrEmpty(Path.GetExtension(path)))
             path += ".md";
 
-        await SaveToAsync(path);
+        await SaveDocumentAsync(doc, path);
     }
 
-    private async Task SaveToAsync(string path)
+    private async Task SaveDocumentAsync(DocumentViewModel doc, string? path = null)
     {
-        try
-        {
-            // 抑制自身保存触发的文件监听事件，否则每次保存都会误报"文件被外部修改"。
-            using (_watcher.SuppressOwnWrite())
-            {
-                await _files.WriteAsync(path, SourceText, _encoding);
-            }
-
-            var pathChanged = !string.Equals(FilePath, path, StringComparison.OrdinalIgnoreCase);
-            FilePath = path;
-            _lastSavedText = SourceText;
-            IsModified = false;
-            StatusMessage = $"已保存 {Path.GetFileName(path)}";
-
-            // 另存为会换文件，需要重新监听新路径。
-            if (pathChanged)
-                _watcher.Watch(path);
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"保存失败：{ex.Message}";
-        }
-    }
-
-    /// <summary>处理检测到的外部修改：询问用户是否重载。</summary>
-    private async Task HandleExternalChangeAsync()
-    {
-        if (string.IsNullOrEmpty(FilePath) || ExternalChangePromptRequested is null)
+        path ??= doc.FilePath;
+        if (string.IsNullOrEmpty(path))
             return;
 
-        // 多个文件事件可能引发重入（实测连续两次外部写入会弹出两个对话框）。
-        // 已有提示正在显示时忽略新的通知。
-        if (_externalPromptOpen)
-            return;
+        var ok = await doc.SaveAsync(path);
+        StatusMessage = ok
+            ? $"已保存 {Path.GetFileName(path)}"
+            : $"保存失败：无法写入 {Path.GetFileName(path)}";
 
-        _externalPromptOpen = true;
-        try
-        {
-            // 磁盘上的内容与上次保存的一致，说明只是时间戳变化（例如编辑器统一 format），
-            // 没必要打扰用户。
-            var (diskText, encoding) = await _files.ReadAsync(FilePath);
-            if (string.Equals(diskText, _lastSavedText, StringComparison.Ordinal))
-            {
-                StatusMessage = "文件在磁盘上被更新（内容无变化）";
-                return;
-            }
-
-            var reload = await ExternalChangePromptRequested();
-            if (!reload)
-            {
-                StatusMessage = "已忽略外部修改";
-                return;
-            }
-
-            ApplyDocument(diskText, FilePath, encoding);
-            StatusMessage = "已重新加载外部修改";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"检测外部修改失败：{ex.Message}";
-        }
-        finally
-        {
-            _externalPromptOpen = false;
-        }
+        // 文档名/标题可能变化
+        OnPropertyChanged(nameof(WindowTitle));
     }
 
-    /// <summary>停止文件监听（应用退出前调用）。</summary>
-    public void StopWatching() => _watcher.Dispose();
+    // ---------- 关闭全部 / 退出 ----------
 
-    public async Task<bool> ConfirmDiscardAsync()
+    /// <summary>关闭所有标签前逐个确认；返回 false 表示用户取消了操作。</summary>
+    public async Task<bool> ConfirmCloseAllAsync()
     {
-        if (!IsModified || Dialogs is null)
+        foreach (var doc in Documents.Where(d => d.IsModified).ToList())
+        {
+            if (!await ConfirmDiscardAsync(doc))
+                return false;
+        }
+
+        return true;
+    }
+
+    public async Task<bool> ConfirmDiscardAsync(DocumentViewModel doc)
+    {
+        if (!doc.IsModified)
             return true;
 
-        return await Dialogs.ConfirmDiscardAsync(DocumentName);
+        if (DiscardPromptRequested is null)
+            return true;
+
+        return await DiscardPromptRequested();
     }
+
+    /// <summary>停止所有文档的监听（退出前调用）。</summary>
+    public void DisposeDocuments()
+    {
+        foreach (var doc in Documents)
+            doc.Dispose();
+    }
+
+    // ---------- 文档相关转发 ----------
+
+    [RelayCommand]
+    private void Find() => FindRequested?.Invoke(this, EventArgs.Empty);
+
+    [RelayCommand]
+    private void NavigateToHeading(MarkdownHeading? heading)
+    {
+        // 由视图订阅 ActiveDocumentChanged 后自行处理；这里保留命令以便大纲绑定。
+        ActiveDocument?.SelectedHeading = heading;
+    }
+
+    // ---------- 视图选项 ----------
+
+    [RelayCommand]
+    private void ToggleOutline() => IsOutlineVisible = !IsOutlineVisible;
 
     [RelayCommand]
     private void ToggleWordWrap() => IsWordWrap = !IsWordWrap;
@@ -457,6 +396,11 @@ public partial class MainViewModel : ObservableObject
         StatusMessage = value ? "已切换到深色主题" : "已切换到浅色主题";
     }
 
+    private Task<bool> PromptExternalChangeAsync() =>
+        ExternalChangePromptRequested is null
+            ? Task.FromResult(false)
+            : ExternalChangePromptRequested(ActiveDocument?.DocumentName ?? "文档");
+
     private const string WelcomeDocument = """
         # Markify
 
@@ -467,10 +411,12 @@ public partial class MainViewModel : ObservableObject
         - [x] 左侧 `AvaloniaEdit` 源码编辑，Markdown 语法高亮（TextMate）
         - [x] 右侧原生控件渲染预览（MarkView.Avalonia + Markdig），无 WebView
         - [x] 180ms 防抖的实时预览与滚动位置同步
+        - [x] **多标签页**：同时打开多个文档，每个标签独立撤销栈与修改状态
         - [x] 文件打开/保存/另存为，UTF-8 / UTF-16 编码与 BOM 保留，原子写入
+        - [x] 外部修改检测：文件被其他程序改动时提示重新加载
+        - [x] `Ctrl+F` / `Ctrl+H` 查找与替换
         - [x] 字数、字符数、光标行列状态栏
         - [x] 明暗主题切换、横/纵分栏、专注预览模式
-        - [ ] 待办：大纲导航、导出 PDF/HTML、多标签页
 
         ## 表格与代码
 
@@ -485,7 +431,7 @@ public partial class MainViewModel : ObservableObject
         public partial string PreviewMarkdown { get; set; } = string.Empty;
         ```
 
-        > 提示：按 `Ctrl+B` 加粗、`Ctrl+I` 斜体、`Ctrl+K` 插入链接，`Ctrl+S` 保存。
+        > 提示：`Ctrl+T` 新建标签，`Ctrl+W` 关闭当前标签，`Ctrl+Tab` 切换标签。
 
         1. 打开或新建一个 `.md` 文件
         2. 在左侧输入，右侧即时呈现

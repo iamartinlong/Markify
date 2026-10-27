@@ -52,5 +52,38 @@
         <Style Selector="Grid.markdown-document">
             <Setter Property="Margin" Value="0,0,12,0" />
         </Style>
+
+        <!-- 文档标签：非活动态半透明，活动态用主题强调色底 -->
+        <Style Selector="Border.tab">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="2,2,2,2" />
+            <Setter Property="Margin" Value="0,0,2,0" />
+        </Style>
+        <Style Selector="Border.tab.active">
+            <Setter Property="Background" Value="{DynamicResource PreviewBackground}" />
+        </Style>
+        <Style Selector="Border.tab Button.tab-title">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Border.tab.active Button.tab-title">
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Border.tab Button.tab-close">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="5,2" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Opacity" Value="0.5" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Border.tab Button.tab-close:pointerover">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="Background" Value="#40FF0000" />
+        </Style>
     </Application.Styles>
 </Application>

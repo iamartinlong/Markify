@@ -20,7 +20,7 @@ public class WordCountTests
     [InlineData("a1b2", 1)]                    // 数字与字母连续算一个词
     public void CountWords_LatinText_SplitsOnSeparators(string text, int expected)
     {
-        Assert.Equal(expected, MainViewModel.CountWords(text));
+        Assert.Equal(expected, DocumentViewModel.CountWords(text));
     }
 
     [Theory]
@@ -33,27 +33,27 @@ public class WordCountTests
     [InlineData("한국어", 3)]                    // 谚文
     public void CountWords_CjkText_CountsPerCharacter(string text, int expected)
     {
-        Assert.Equal(expected, MainViewModel.CountWords(text));
+        Assert.Equal(expected, DocumentViewModel.CountWords(text));
     }
 
     [Fact]
     public void CountWords_MixedScripts_CombinesBothRules()
     {
         // "Hello 世界" => 1 英文词 + 2 汉字
-        Assert.Equal(3, MainViewModel.CountWords("Hello 世界"));
+        Assert.Equal(3, DocumentViewModel.CountWords("Hello 世界"));
     }
 
     [Fact]
     public void CountWords_MarkdownSyntax_CountsMarkersAsSeparators()
     {
         // "# Title" 的 # 不是词，Title 是 1 个词
-        Assert.Equal(1, MainViewModel.CountWords("# Title"));
+        Assert.Equal(1, DocumentViewModel.CountWords("# Title"));
     }
 
     [Fact]
     public void CountWords_ConsecutiveCjkAndLatin_DoesNotMerge()
     {
         // 汉字与英文相邻时应有明确边界：2 个汉字 + 1 个词
-        Assert.Equal(3, MainViewModel.CountWords("中文abc"));
+        Assert.Equal(3, DocumentViewModel.CountWords("中文abc"));
     }
 }
