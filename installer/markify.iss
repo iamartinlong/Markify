@@ -46,7 +46,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 
 OutputDir={#SourcePath}\..\artifacts\installer
 OutputBaseFilename=Markify-{#MyAppVersion}-setup
-SetupIconFile={#SourcePath}\..\src\Markify\Assets\avalonia-logo.ico
+SetupIconFile={#SourcePath}\..\src\Markify\Assets\markify-logo.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
 

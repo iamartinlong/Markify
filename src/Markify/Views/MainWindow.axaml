@@ -10,7 +10,7 @@
         mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="800"
         x:Class="Markify.Views.MainWindow"
         x:DataType="vm:MainViewModel"
-        Icon="/Assets/avalonia-logo.ico"
+        Icon="/Assets/markify-logo.ico"
         Width="1280" Height="820"
         MinWidth="640" MinHeight="400"
         Title="{Binding WindowTitle}">

@@ -57,6 +57,29 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
+      - name: Verify logo assets are up to date
+        shell: pwsh
+        run: |
+          # 图标由 tools/LogoGen 从几何定义生成。若有人改了 Program.cs 却没重新生成，
+          # 提交里的 ico/png/svg 就会和源码不一致。这里重新生成到临时目录并比对。
+          $tmp = "artifacts/logocheck"
+          dotnet run --project tools/LogoGen -c Release -- $tmp
+          if ($LASTEXITCODE -ne 0) { throw "LogoGen failed" }
+
+          $targets = @('markify-logo.ico','markify-logo.png','markify-logo.svg')
+          $bad = @()
+          foreach ($name in $targets) {
+            $committed = "src/Markify/Assets/$name"
+            if (-not (Test-Path $committed)) { $bad += "$name missing"; continue }
+            $a = (Get-FileHash $committed -Algorithm SHA256).Hash
+            $b = (Get-FileHash "$tmp/$name" -Algorithm SHA256).Hash
+            if ($a -ne $b) { $bad += "$name differs" }
+          }
+          if ($bad) {
+            throw "logo assets out of date ($($bad -join ', ')); run: dotnet run --project tools/LogoGen -- src/Markify/Assets"
+          }
+          Write-Host "OK: logo assets match the generator"
+
       - name: Build a throwaway staging copy
         run: >
           dotnet publish src/Markify -c Release -r win-x64 --self-contained true

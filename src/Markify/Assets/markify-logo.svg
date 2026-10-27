@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Markify placeholder logo. Replace with the final brand asset when available. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Markify">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2B3A67"/>
+      <stop offset="1" stop-color="#1B2440"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="244" height="244" rx="56" fill="url(#bg)"/>
+  <path d="M 76 170 L 76 86 L 128 140 L 180 86 L 180 170" 
+        fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="190" cy="66" r="19" fill="#FFB33D"/>
+</svg>

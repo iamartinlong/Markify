@@ -8,6 +8,13 @@
     <AssemblyName>Markify</AssemblyName>
     <RootNamespace>Markify</RootNamespace>
 
+    <!--
+      exe 内嵌图标（资源管理器 / 任务栏 / 文件关联都用它）。
+      注意 Avalonia 的 Window.Icon 只影响运行时的窗口，不会写入 exe，
+      两者必须分别设置。
+    -->
+    <ApplicationIcon>Assets\markify-logo.ico</ApplicationIcon>
+
     <!-- 版本由 CI/CD 通过 -p:Version 覆盖；本地构建用这个默认值。 -->
     <Version>0.1.0</Version>
     <Product>Markify</Product>

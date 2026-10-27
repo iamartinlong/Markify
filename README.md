@@ -1,6 +1,10 @@
 # Markify
 
+<img src="src/Markify/Assets/markify-logo.png" alt="Markify logo" width="96" align="right">
+
 一个用 [Avalonia 12](https://avaloniaui.net) 构建的轻量级 Markdown 编辑/预览客户端：左侧源码编辑，右侧原生控件实时预览，**不使用 WebView**。
+
+> 当前图标为**临时占位设计**，后续会替换为正式品牌 Logo。
 
 ![布局](docs/screenshot.png)
 
@@ -45,6 +49,10 @@ dotnet run -- ..\..\samples\demo.md
 ```
 src/Markify/
 ├─ App.axaml                     主题与样式引入（AvaloniaEdit / MarkView 必需）
+├─ Assets/
+│  ├─ markify-logo.svg           图标源（矢量，可读）
+│  ├─ markify-logo.png           1024px 位图（README / 文档用）
+│  └─ markify-logo.ico           多尺寸图标（窗口 + exe + 安装包）
 ├─ ViewModels/
 │  └─ MainViewModel.cs           文档状态、防抖预览、大纲、命令
 ├─ Views/
@@ -56,9 +64,38 @@ src/Markify/
 │  ├─ DocumentFormats.cs         支持的扩展名
 │  ├─ IDocumentDialogService.cs  对话框抽象（VM 不依赖窗口）
 │  └─ MarkdownOutline.cs         Markdig AST → 标题大纲 + GitHub 锚点
-└─ docs/
-   └─ avalonia-markdown-client.md   完整技术调研与选型报告
+├─ docs/
+│  └─ avalonia-markdown-client.md   完整技术调研与选型报告
+tools/LogoGen/                    图标生成器（SVG / PNG / ICO 同源输出）
 ```
+
+## 图标
+
+当前为**临时占位图标**，用于开发期和早期版本。正式 Logo 到位后按下面步骤替换。
+
+图标由 `tools/LogoGen` 从一份几何定义生成三种格式，避免手工导出多份文件后不同步：
+
+```powershell
+dotnet run --project tools/LogoGen -- src/Markify/Assets
+```
+
+输出 `markify-logo.svg`（矢量源）、`markify-logo.png`（1024px）、`markify-logo.ico`（16/24/32/48/64/128/256 多尺寸）。
+
+**接入位置**（替换时需一并检查）：
+
+| 位置 | 文件 |
+| --- | --- |
+| 窗口标题栏 / 任务栏 | `Views/MainWindow.axaml` 的 `Icon=` |
+| exe 内嵌图标（资源管理器、文件关联） | `Markify.csproj` 的 `<ApplicationIcon>` |
+| 安装包与卸载项 | `installer/markify.iss` 的 `SetupIconFile` |
+
+**换成正式 Logo 时**：
+
+1. 直接把新图覆盖上面三个文件（提供 1024px PNG + 含 16/256 的 ICO 即可）；
+2. 若不再需要程序生成，删除 `tools/LogoGen` 与 `.github/workflows/aot.yml` 里的 `Verify logo assets` 步骤；
+3. 保留 SVG 便于日后修改。
+
+CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提交产物。
 
 ## 技术选型
 
