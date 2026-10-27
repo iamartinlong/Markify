@@ -319,6 +319,56 @@ protected override async void OnClosing(WindowClosingEventArgs e)
 
 ---
 
+### B7. MarkView 的滚动条浮在内容之上，会压住表格边框
+
+**现象** 🔬 实测
+
+预览区右侧的表格右边框与滚动条**重叠**，视觉上像被截断。
+
+```
+滚动条滑块  x = 1252-1253
+表格右边框  x = 1255        ← 越过了滚动条
+```
+
+**根因**
+
+`MarkdownViewer` 的 `PART_ScrollViewer` 用的是 overlay 式滚动条，**不为自己预留布局宽度**。文档内容按 ScrollViewer 的完整宽度排版，滚动条随后画在内容之上，于是贴右边缘的元素（表格边框、代码块背景）被盖住。
+
+**关键实验：改容器 padding 无效**
+
+我先把 `PreviewHost` 的右 padding 从 16 加到 24，结果：
+
+```
+padding=16 → 滚动条 1252-1253, 表格 1255   （重合 2px）
+padding=24 → 滚动条 1244-1245, 表格 1247   （重合 2px）
+```
+
+**两者一起左移，相对位置完全不变。** 因为容器 padding 同时内缩了 ScrollViewer 和它的内容，滚动条与内容的相对关系没变。
+
+**解法**
+
+要改的是**文档内容自身的宽度**，不是它的容器。`Grid.markdown-document` 是渲染文档的根元素（MarkView 的公开 style class），给它加右外边距即可：
+
+```xml
+<Style Selector="Grid.markdown-document">
+    <Setter Property="Margin" Value="0,0,12,0" />
+</Style>
+```
+
+同时把 `PreviewHost` 的右 padding 归零，避免右边距叠加两次：
+
+```xml
+<Border x:Name="PreviewHost" Padding="24,16,0,16" ... />
+```
+
+修复后实测：表格 `x=1259`，滚动条 `x=1268-1269`，**间隙 9px**。
+
+**可复用的判断**：遇到"内容被浮层遮挡"（overlay 滚动条、悬浮按钮、粘性表头），**调容器的 padding 一定是无效的**——必须改内容层的尺寸或边距。判断方法：同时移动前后测量两者的相对距离，如果距离不变，就说明动错了层级。
+
+**顺带**：这条也说明"加 padding"和"加 margin"在 WPF/Avalonia 里对布局的影响不同——`Padding` 内缩子元素，`Margin` 只影响元素自身在父容器中的位置。这里需要的是后者。
+
+---
+
 ## C. 编辑器与预览的滚动同步
 
 这是本项目**最费时**的一块，连踩三个坑。三个坑彼此独立，任何一个没解决都会让同步完全失效。
@@ -885,6 +935,7 @@ assert($current -eq 'Sentinel.TestHandler')
 | 布局不生效 | 检查是不是只改了 `IsVisible` 而没改 Grid 轨道；确认有"初始应用"入口 |
 | 底部/右侧多出固定宽度空白 | 某个 `Height=0` 的轨道仍带 `MinHeight>0`，Grid 会按最小尺寸撑开（B3） |
 | 行号/滚动条线提前断开 | 量「线终点 / 内容区终点 / 容器终点」，差值是 padding 或 margin（B6） |
+| 内容被滚动条/浮层压住 | 调容器 padding 无效（会连滚动条一起移）；改内容层 margin（B7） |
 | 滚动不同步 | 分别打印两侧的 `Offset / Extent / Viewport`，先确认 ratio 不是恒 0 |
 | AOT 崩溃 | 先手工跑 `--selftest`；再确认 `Assembly.Location` 是否为空（是否真 AOT） |
 | 安装包启动崩 | 检查 `{app}` 下原生库是否齐全（缺 Skia 必崩） |

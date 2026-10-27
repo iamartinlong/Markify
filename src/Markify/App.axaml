@@ -41,5 +41,16 @@
             <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
             <Setter Property="Padding" Value="12,4" />
         </Style>
+
+        <!--
+          MarkView 的滚动条浮在文档内容之上，不为自身预留宽度：
+          文档内容会一直画到 ScrollViewer 右边缘，于是表格边框正好压在滚动条上（实测重合 2px）。
+          给文档根元素（Grid.markdown-document）加右外边距，把内容收窄到滚动条左侧。
+          放在文档级而不是容器 Border 的 Padding 上，是因为容器 padding 会连同滚动条一起内缩，
+          两者相对位置不变，问题依旧。
+        -->
+        <Style Selector="Grid.markdown-document">
+            <Setter Property="Margin" Value="0,0,12,0" />
+        </Style>
     </Application.Styles>
 </Application>
