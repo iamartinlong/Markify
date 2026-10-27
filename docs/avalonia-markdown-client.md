@@ -311,7 +311,7 @@ partial void OnIsDarkThemeChanged(bool value)
 | 内存（30KB 文档） | 约 90–130MB（Avalonia + Skia 基线） |
 | 逐键输入延迟 | 无感（防抖后仅每 180ms 一次重解析） |
 | 发布体积（自包含 win-x64） | 约 60–80MB；开 trimming 后约 45–55MB |
-| **NativeAOT（win-x64）** | **`Markify.exe` 34.2MB，运行文件合计 52.7MB**（见 §7.1） |
+| **NativeAOT（win-x64）** | **`Markify.exe` 34.21MB，运行文件合计 52.72MB，zip 包 19.91MB**（见 §7.1） |
 
 **体积优化建议**：
 
@@ -370,6 +370,10 @@ artifacts/aot/Markify.exe --selftest --selftest-output artifacts/selftest-aot.tx
 ```
 
 首次贡献或升级 Avalonia/MarkView 后建议重跑，这是发现「AOT 回归」成本最低的手段。
+
+**发布流程（CD）**：`.github/workflows/release.yml` 由 `v*` tag 触发，链路为：构建 → JIT 自检 → AOT 发布 → AOT 自检（并断言 `isAot=yes`）→ 校验产物只含原生库 → 打包（排除 pdb）→ **解包后运行一次**（防止压缩破坏目录结构）→ 生成 SHA-256 → 创建 GitHub Release。
+
+v0.1.0 实测发布数据：zip 19.91 MB，解包后 52.72 MB / 5 个文件，本机运行 9/9 自检通过，GUI 正常启动，内存约 133 MB。
 
 ---
 

@@ -80,20 +80,22 @@ src/Markify/
 
 ## NativeAOT
 
-本项目**已通过 NativeAOT 实测验证**（CI 在 `windows-latest` 上每次提交自动跑）：
+本项目**已通过 NativeAOT 实测验证**，并通过 CD 流程真正发布（[v0.1.0](https://github.com/iamartinlong/Markify/releases/tag/v0.1.0)）。
 
 | 项目 | 实测 |
 | --- | --- |
 | `Markify.exe` | 34.21 MB |
-| 运行文件合计（不含 pdb） | 52.7 MB / 5 个文件 |
+| 运行文件合计（不含 pdb） | 52.72 MB / 5 个文件 |
+| 发布包（zip） | 19.91 MB |
 | AOT 自检 | 9/9 通过 |
 | 裁剪 IL 警告 | 0 |
+| 运行时内存 | 约 133 MB |
 
 ```powershell
 dotnet publish src/Markify -c Release -r win-x64 -p:PublishAot=true -p:StripSymbols=true -o artifacts/aot
 ```
 
-产物是 `Markify.exe` + 4 个原生库（Skia / HarfBuzz / onig / GLES），**不是严格单文件**。PDB 约 200MB，发布时需排除。
+产物是 `Markify.exe` + 4 个原生库（Skia / HarfBuzz / onig / GLES），**不是严格单文件**。PDB 约 200MB，发布包已排除。
 
 ### 自检模式
 
@@ -105,7 +107,29 @@ artifacts/aot/Markify.exe --selftest --selftest-output artifacts/selftest-aot.tx
 
 报告含 `isAot: yes/no`，用于确认跑的是 AOT 产物而非回落到 JIT。升级 Avalonia / MarkView 后建议重跑。
 
+### 发布流程
+
+| 工作流 | 触发 | 作用 |
+| --- | --- | --- |
+| `aot.yml` | push / PR | 每次提交验证 JIT 与 AOT 均可构建、自检通过 |
+| `release.yml` | `v*` tag | 构建 → 自检 → 打包（排除 pdb）→ 校验包内二进制 → 生成 SHA-256 → 创建 GitHub Release |
+
+发布新版本：
+
+```powershell
+git tag -a v0.2.0 -m "Markify v0.2.0"
+git push origin v0.2.0
+```
+
 详见 [docs/avalonia-markdown-client.md §7.1](docs/avalonia-markdown-client.md)。
+
+## 下载
+
+从 [Releases](https://github.com/iamartinlong/Markify/releases) 下载 `Markify-<version>-win-x64.zip`，解压后直接运行 `Markify.exe`。
+
+- 需要 Windows 10/11 x64
+- **无需安装 .NET 运行时**（NativeAOT 自包含）
+- 压缩包内含 `.sha256` 校验文件
 
 ## 许可
 
