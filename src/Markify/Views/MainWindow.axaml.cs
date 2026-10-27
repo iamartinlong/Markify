@@ -216,14 +216,18 @@ public partial class MainWindow : Window, IDocumentDialogService
 
         rows[0] = new RowDefinition(new GridLength(1, GridUnitType.Star))
         {
-            MinHeight = vertical ? 120 : 120,
+            // 编辑器行：上下分栏时才需要最小高度限制；左右分栏时它独占整行，不受影响。
+            MinHeight = 120,
         };
         rows[1] = new RowDefinition(
             new GridLength(!vertical && showPreview ? 1 : 0, GridUnitType.Pixel));
         rows[2] = new RowDefinition(
             !vertical && showPreview ? new GridLength(1, GridUnitType.Star) : new GridLength(0))
         {
-            MinHeight = 120,
+            // 预览行的最小高度必须跟随可见性。
+            // Grid 的行即使 Height 为 0，只要 MinHeight > 0 仍会被撑开——
+            // 之前无条件写 120，导致左右分栏时底部多出一条 120px 的空白。
+            MinHeight = !vertical && showPreview ? 120 : 0,
         };
 
         if (vertical)

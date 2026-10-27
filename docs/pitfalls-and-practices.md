@@ -178,7 +178,56 @@ Loaded += (_, _) => ApplyPaneLayout();
 
 ---
 
-### B3. 主题切换要分别处理「界面」和「编辑器」
+### B3. `Height=0` 的 Grid 行/列会被 `MinHeight`/`MinWidth` 撑开
+
+**现象** 🔬 实测
+
+左右分栏时，编辑器与预览下方多出一条 **120px 的空白带**，且随窗口宽度整幅延伸。
+
+**根因**
+
+```csharp
+rows[2] = new RowDefinition(new GridLength(0))   // Height = 0 ✓
+{
+    MinHeight = 120,                              // ✗ 但最小高度是 120
+};
+```
+
+Grid 布局里 **`MinHeight` 的优先级高于 `Height`**。即使把高度设成 0，只要 `MinHeight > 0`，这一行仍会占据 120px。
+
+同一个方法里还写过一个无效的三元表达式，它没有暴露问题，但说明这段逻辑没被认真检查：
+
+```csharp
+MinHeight = vertical ? 120 : 120,   // 两个分支相同，等于常数
+```
+
+**解法**
+
+`MinHeight` 必须和该轨道的可见性/存在性保持一致：
+
+```csharp
+rows[2] = new RowDefinition(
+    !vertical && showPreview ? new GridLength(1, GridUnitType.Star) : new GridLength(0))
+{
+    MinHeight = !vertical && showPreview ? 120 : 0,   // 一起归零
+};
+```
+
+**XAML 里的初始定义也要同步**，否则 `ApplyPaneLayout()` 还没来得及执行时同样会显示空白：
+
+```xml
+<RowDefinition Height="*" MinHeight="120" />
+<RowDefinition Height="0" MinHeight="0" />   <!-- 不能省 MinHeight="0" -->
+<RowDefinition Height="0" MinHeight="0" />
+```
+
+**排查手法**：空白带如果是**单色、等宽、位置固定**，优先怀疑某个**空轨道被最小尺寸撑开**，而不是内边距或对齐问题。用 DevTools 的可视树选中那一行看实际尺寸最快。
+
+**同类陷阱**：`MinWidth` / `MaxHeight` / `GridSplitter` 所在的像素轨道、以及 `Width=0` 但 `MinWidth>0` 的列，都是同一个模式。
+
+---
+
+### B4. 主题切换要分别处理「界面」和「编辑器」
 
 **现象** 🔬 实测
 
@@ -203,7 +252,7 @@ private void ApplyEditorTheme(bool dark)
 
 ---
 
-### B4. 自定义 `Window` 的关闭确认里不能直接 `Close()`
+### B5. 自定义 `Window` 的关闭确认里不能直接 `Close()`
 
 **现象** ⚠️ 推断（按此写法会重入，已在实现中规避）
 
@@ -797,6 +846,7 @@ assert($current -eq 'Sentinel.TestHandler')
 | 控件找不到了 | `control.GetVisualDescendants().GroupBy(x => x.GetType().Name)` 打印类型直方图 |
 | 事件没触发 | 在回调里先写一行日志到文件（WinExe 无控制台，`Console` 不可见） |
 | 布局不生效 | 检查是不是只改了 `IsVisible` 而没改 Grid 轨道；确认有"初始应用"入口 |
+| 底部/右侧多出固定宽度空白 | 某个 `Height=0` 的轨道仍带 `MinHeight>0`，Grid 会按最小尺寸撑开（B3） |
 | 滚动不同步 | 分别打印两侧的 `Offset / Extent / Viewport`，先确认 ratio 不是恒 0 |
 | AOT 崩溃 | 先手工跑 `--selftest`；再确认 `Assembly.Location` 是否为空（是否真 AOT） |
 | 安装包启动崩 | 检查 `{app}` 下原生库是否齐全（缺 Skia 必崩） |

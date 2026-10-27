@@ -122,9 +122,11 @@
                     <ColumnDefinition Width="*" MinWidth="200" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
+                    <!-- 与 ApplyPaneLayout() 保持一致：左右分栏时预览行与分割条高度为 0，
+                         MinHeight 也必须是 0，否则空行会被撑出可见高度（底部多出一条空白）。 -->
                     <RowDefinition Height="*" MinHeight="120" />
-                    <RowDefinition Height="0" />
-                    <RowDefinition Height="0" />
+                    <RowDefinition Height="0" MinHeight="0" />
+                    <RowDefinition Height="0" MinHeight="0" />
                 </Grid.RowDefinitions>
 
                 <Border x:Name="EditorHost" Grid.Row="0" Grid.Column="0"
