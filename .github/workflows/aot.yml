@@ -1,0 +1,107 @@
+name: aot
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # 阶段一：JIT 基线。先证明代码本身能构建、自检能过，
+  # 这样后面 AOT 失败时才能确定是 AOT 的问题，而不是代码本来就有问题。
+  jit-baseline:
+    name: JIT baseline
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build src/Markify -c Release --nologo
+
+      - name: Self-test (JIT)
+        shell: pwsh
+        run: |
+          $exe = "src/Markify/bin/Release/net10.0/Markify.exe"
+          $out = "artifacts/selftest-jit.txt"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $p = Start-Process -FilePath $exe `
+                 -ArgumentList '--selftest','--selftest-output',$out `
+                 -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "self-test timed out" }
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "self-test failed with exit code $($p.ExitCode)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selftest-jit
+          path: artifacts/selftest-jit.txt
+
+  # 阶段二：NativeAOT 发布 + 在真实原生二进制上跑同一套自检。
+  # 这是本工作流的核心：编译通过不代表 AOT 能跑，必须实际执行。
+  aot-build:
+    name: NativeAOT build & self-test
+    needs: jit-baseline
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish NativeAOT
+        run: >
+          dotnet publish src/Markify -c Release -r win-x64
+          -p:PublishAot=true
+          -p:StripSymbols=true
+          -o artifacts/aot
+
+      - name: Report size
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem artifacts/aot -File
+          $total = ($files | Measure-Object Length -Sum).Sum
+          "-- total: {0:N1} MB in {1} files" -f ($total/1MB), $files.Count | Write-Host
+          $files | Sort-Object Length -Descending |
+            Select-Object -First 5 Name, @{n='MB';e={'{0:N1}' -f ($_.Length/1MB)}} |
+            Format-Table | Out-String | Write-Host
+          "-- Markify.exe: {0:N1} MB" -f ((Get-Item artifacts/aot/Markify.exe).Length/1MB) | Write-Host
+
+      - name: Self-test (AOT)
+        shell: pwsh
+        run: |
+          $exe = "artifacts/aot/Markify.exe"
+          $out = "artifacts/selftest-aot.txt"
+          $p = Start-Process -FilePath $exe `
+                 -ArgumentList '--selftest','--selftest-output',$out `
+                 -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "AOT self-test timed out" }
+          if (Test-Path $out) { Get-Content $out } else { Write-Host "no report produced" }
+          if ($p.ExitCode -ne 0) { throw "AOT self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Verify no managed runtime dependency
+        shell: pwsh
+        run: |
+          # AOT 产物必须是单文件原生二进制：不应出现托管 dll。
+          $managed = Get-ChildItem artifacts/aot -Filter *.dll -File
+          if ($managed) {
+            Write-Host "Unexpected managed assemblies in AOT output:"
+            $managed | Select-Object Name | Format-Table | Out-String | Write-Host
+            throw "AOT output contains managed DLLs"
+          }
+          if (-not (Test-Path artifacts/aot/Markify.exe)) { throw "Markify.exe missing" }
+          Write-Host "OK: native single-file layout"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: selftest-aot
+          path: artifacts/selftest-aot.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: markify-win-x64-aot
+          path: artifacts/aot/

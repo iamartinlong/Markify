@@ -187,11 +187,11 @@ public partial class MainViewModel : ObservableObject
         WordCount = CountWords(text);
     }
 
-    private static int CountWords(string text)
+    /// <summary>统计词数：CJK 按字计，拉丁文字按空白/标点分词。</summary>
+    internal static int CountWords(string text)
     {
         var words = 0;
         var inLatinWord = false;
-
         foreach (var ch in text)
         {
             // CJK 统一表意文字与扩展区、假名、谚文：每个字符视作一个词。
