@@ -193,9 +193,9 @@ begin
     end;
   end;
 
-  RegDeleteKeyIfEmpty(HKA, BackupRoot);
-  { 备份键里还留着扩展名子值，是非空键，必须用 including-subkeys 版本清理；
-    普通 RegDeleteKey 只能删空键（实测会留下 HKCU\Software\Markify\Backup）。 }
+  { 备份键里还留着扩展名子值，是非空键，必须用 including-subkeys 版本清理：
+    RegDeleteKeyIfEmpty 只处理空键，普通 RegDeleteKey 删非空键会失败，
+    两者都会留下 HKCU\Software\Markify\Backup 残留（实测）。 }
   RegDeleteKeyIncludingSubkeys(HKA, BackupRoot);
   RegDeleteKeyIncludingSubkeys(HKA, 'Software\Markify');
 end;

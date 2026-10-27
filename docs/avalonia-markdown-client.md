@@ -108,6 +108,8 @@
 
 ## 4. 关键实现细节（含踩坑）
 
+> 本节是**精简版**，面向选型决策。完整的「现象→根因→解法→怎么快速发现」记录，以及 AOT、安装包、文件关联、CI 测试设计等问题，见 [pitfalls-and-practices.md](pitfalls-and-practices.md)。
+
 ### 4.1 AvaloniaEdit 初始化
 
 ```csharp
@@ -421,6 +423,7 @@ dotnet run                                     # 或：dotnet run -- path\to\doc
 
 ## 10. 参考资料
 
+- **本项目实践经验与踩坑记录**：[pitfalls-and-practices.md](pitfalls-and-practices.md)
 - Avalonia 官方文档 · Markdown 控件（Pro）：https://docs.avaloniaui.net/controls/documents/markdown
 - MarkView.Avalonia 文档：https://kryptos-fr.github.io/MarkView.Avalonia/
 - MarkView.Avalonia 仓库（MIT）：https://github.com/Kryptos-FR/MarkView.Avalonia

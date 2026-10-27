@@ -71,7 +71,9 @@ src/Markify/
 
 发布：支持 NativeAOT（已实测，`Markify.exe` 34.2MB）。
 
-选型依据、与备选方案（Markdown.Avalonia、官方 Pro 控件、WebView）的对比、以及实现中遇到的 5 个关键坑，见 [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md)。
+选型依据、与备选方案（Markdown.Avalonia、官方 Pro 控件、WebView）的对比，见 [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md)。
+
+开发中实际踩的坑与排查手法（滚动同步、AOT、安装包、文件关联等 20+ 条），见 [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md)。
 
 ## 已知限制
 
