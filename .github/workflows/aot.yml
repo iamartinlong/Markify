@@ -80,21 +80,54 @@ jobs:
                  -ArgumentList '--selftest','--selftest-output',$out `
                  -PassThru
           if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "AOT self-test timed out" }
-          if (Test-Path $out) { Get-Content $out } else { Write-Host "no report produced" }
+          if (Test-Path $out) { Get-Content $out } else { throw "no self-test report produced" }
           if ($p.ExitCode -ne 0) { throw "AOT self-test failed with exit code $($p.ExitCode)" }
 
-      - name: Verify no managed runtime dependency
+          # 确证跑的是 AOT 产物而不是回落到了 JIT 版本：报告里必须标记 isAot=yes。
+          $report = Get-Content $out -Raw
+          if ($report -notmatch 'isAot \(approx\): yes') {
+            throw "self-test did not run under NativeAOT (isAot flag missing)"
+          }
+          Write-Host "confirmed: self-test ran under NativeAOT"
+
+      - name: Verify native output layout
         shell: pwsh
         run: |
-          # AOT 产物必须是单文件原生二进制：不应出现托管 dll。
-          $managed = Get-ChildItem artifacts/aot -Filter *.dll -File
-          if ($managed) {
-            Write-Host "Unexpected managed assemblies in AOT output:"
-            $managed | Select-Object Name | Format-Table | Out-String | Write-Host
-            throw "AOT output contains managed DLLs"
-          }
+          # 校验 AOT 产物形态。
+          # 注意：不能简单地"存在 .dll 就失败"——libSkiaSharp/libHarfBuzzSharp/libonigwrap/
+          # av_libglesv2 都是原生库，AOT 应用本来就依赖它们。真正的判据是：
+          # 应用自身的托管程序集（Markify.dll、Avalonia*.dll 等）不应出现。
           if (-not (Test-Path artifacts/aot/Markify.exe)) { throw "Markify.exe missing" }
-          Write-Host "OK: native single-file layout"
+
+          $dlls = Get-ChildItem artifacts/aot -Filter *.dll -File
+          $nativeAllow = @('libSkiaSharp.dll','libHarfBuzzSharp.dll','libonigwrap.dll','av_libglesv2.dll')
+          $unexpected = $dlls | Where-Object { $nativeAllow -notcontains $_.Name }
+
+          if ($unexpected) {
+            Write-Host "Unexpected DLLs in AOT output:"
+            $unexpected | Select-Object Name, @{n='MB';e={'{0:N1}' -f ($_.Length/1MB)}} |
+              Format-Table | Out-String | Write-Host
+            throw "AOT output contains non-native DLLs (likely a managed assembly leaked through)"
+          }
+
+          # 托管程序集必然带 CLR 头；这里抽查 Markify 自身是否已被编译进 exe。
+          if (Test-Path artifacts/aot/Markify.dll) { throw "Markify.dll should not exist in an AOT build" }
+
+          Write-Host "OK: Markify.exe is native, only known native dependencies remain"
+          Write-Host ("native dlls: " + (($dlls | ForEach-Object Name) -join ', '))
+
+      - name: Report runtime footprint (excluding symbols)
+        shell: pwsh
+        run: |
+          # PDB 体积很大但不随发布分发，单独统计，避免误导"体积优化"的判断。
+          $all = Get-ChildItem artifacts/aot -File
+          $runtime = $all | Where-Object { $_.Extension -ne '.pdb' }
+          $symbols = $all | Where-Object { $_.Extension -eq '.pdb' }
+          "-- runtime (no pdb): {0:N1} MB in {1} files" -f (($runtime | Measure-Object Length -Sum).Sum/1MB), $runtime.Count | Write-Host
+          "-- symbols (pdb)  : {0:N1} MB in {1} files" -f (($symbols | Measure-Object Length -Sum).Sum/1MB), $symbols.Count | Write-Host
+          $runtime | Sort-Object Length -Descending |
+            Select-Object Name, @{n='MB';e={'{0:N2}' -f ($_.Length/1MB)}} |
+            Format-Table | Out-String | Write-Host
 
       - uses: actions/upload-artifact@v4
         with:

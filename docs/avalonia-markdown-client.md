@@ -311,6 +311,7 @@ partial void OnIsDarkThemeChanged(bool value)
 | 内存（30KB 文档） | 约 90–130MB（Avalonia + Skia 基线） |
 | 逐键输入延迟 | 无感（防抖后仅每 180ms 一次重解析） |
 | 发布体积（自包含 win-x64） | 约 60–80MB；开 trimming 后约 45–55MB |
+| **NativeAOT（win-x64）** | **`Markify.exe` 34.2MB，运行文件合计约 52MB**（见 §7.1） |
 
 **体积优化建议**：
 
@@ -322,7 +323,50 @@ partial void OnIsDarkThemeChanged(bool value)
 <InvariantGlobalization>true</InvariantGlobalization>
 ```
 
-注意：**不要开 `PublishAot`**。Avalonia 的 XAML 编译、Markdig 的泛型、TextMate 的正则加载都有反射/动态代码路径，AOT 需要大量 `DynamicDependency` 标注，且 `MarkView.Avalonia` 未声明 AOT 兼容。真要 AOT 需先验证三条依赖链。
+### 7.1 NativeAOT 实测结论（已用 CI 验证）
+
+初版本文曾建议「不要开 `PublishAot`」，理由是 Avalonia 的 XAML、Markdig 泛型、TextMate 正则都有反射路径。**该结论经实测被推翻**，故更正如下。
+
+CI（`.github/workflows/aot.yml`）在 `windows-latest` 上跑通了完整链路：
+
+| 项目 | 结果 |
+| --- | --- |
+| `PublishAot=true` 编译 | ✅ 成功（约 60s） |
+| AOT 自检 9 项 | ✅ 9/9 通过 |
+| 确认为原生编译 | ✅ 报告 `isAot: yes`，`Assembly.Location` 为空 |
+| `Markify.exe` | 34.2 MB |
+| 运行文件合计（不含 pdb） | 约 52 MB |
+| 裁剪分析器 IL 警告 | 0（`TrimmerSingleWarn=false` 展开后） |
+
+**关键点：裁剪/编译通过不等于能跑，必须实际执行。** 本项目为此加了 `--selftest` 模式，在**真实原生二进制**里验证最易被裁剪破坏的 9 条路径：XAML 资源装载、AvaloniaEdit 文档与 TextMate transformer、Markdig 解析、MarkView 控件树构建（146 个可视后代 / 39 个 TextBlock）、主题模板里的 `PART_ScrollViewer`、主题切换、CJK 字数、文件 IO 往返。报告末尾的 `isAot` 标记用来防止「CI 悄悄跑了 JIT 版本」这种假通过。
+
+**AOT 产物的形态**（不要用「有没有 .dll」来判断）：
+
+```
+Markify.exe            34.2 MB   ← 应用本身（含运行时）
+libSkiaSharp.dll       11.1 MB   ← 原生库
+libHarfBuzzSharp.dll   ~4 MB     ← 原生库
+libonigwrap.dll        ~1 MB     ← 原生库（TextMate 正则）
+av_libglesv2.dll       ~1 MB     ← 原生库（GLES）
+```
+
+这四个 `.dll` 是**原生**动态库，AOT 应用本来就需要它们，发布时必须一起分发。真正需要断言的是「`Markify.dll` 这类托管程序集不存在」。
+
+**仍需注意**：
+
+- PDB 体积很大（`Markify.pdb` 100MB、`libSkiaSharp.pdb` 80MB），但**不随发布分发**；`StripSymbols=true` 只剥离 exe 自身符号，第三方 PDB 仍在，做发布包时需显式排除 `*.pdb`。
+- AOT 不是「单文件」：exe + 4 个原生 dll。若要求严格单文件需额外打包，与 AOT 无直接关系。
+- 只在 `win-x64` 验证过。`osx-arm64` / `linux-x64` 未验证，跨平台 AOT 需各自跑一遍。
+- 应用使用 `Process`/反射的动态场景若以后引入（如插件加载），AOT 下会失效，需回来重跑自检。
+
+**自检的复现方式**：
+
+```powershell
+dotnet publish src/Markify -c Release -r win-x64 -p:PublishAot=true -p:StripSymbols=true -o artifacts/aot
+artifacts/aot/Markify.exe --selftest --selftest-output artifacts/selftest-aot.txt
+```
+
+首次贡献或升级 Avalonia/MarkView 后建议重跑，这是发现「AOT 回归」成本最低的手段。
 
 ---
 
