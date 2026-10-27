@@ -1,0 +1,177 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.1.0 (used when not triggered by a tag)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: write   # 创建 GitHub Release 并上传产物
+
+jobs:
+  # 发布前必须先证明代码和 AOT 都正常；否则宁可失败也不发布坏包。
+  verify:
+    name: Build & self-test (JIT)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $v = '${{ github.ref_name }}' -replace '^v', ''
+          } else {
+            $v = '${{ inputs.version }}'
+          }
+          if ($v -notmatch '^\d+\.\d+\.\d+') { throw "invalid version: $v" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "version = $v"
+
+      - name: Build
+        run: dotnet build src/Markify -c Release -p:Version=${{ steps.ver.outputs.version }} --nologo
+
+      - name: Self-test (JIT)
+        shell: pwsh
+        run: |
+          $exe = "src/Markify/bin/Release/net10.0/Markify.exe"
+          $out = "artifacts/selftest-jit.txt"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $p = Start-Process -FilePath $exe -ArgumentList '--selftest','--selftest-output',$out -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "self-test timed out" }
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
+
+  publish:
+    name: Publish AOT & create release
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $v = '${{ github.ref_name }}' -replace '^v', ''
+          } else {
+            $v = '${{ inputs.version }}'
+          }
+          if ($v -notmatch '^\d+\.\d+\.\d+') { throw "invalid version: $v" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "version = $v"
+
+      - name: Publish NativeAOT
+        run: >
+          dotnet publish src/Markify -c Release -r win-x64
+          -p:PublishAot=true
+          -p:StripSymbols=true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o artifacts/aot
+
+      - name: Self-test (AOT)
+        shell: pwsh
+        run: |
+          $exe = "artifacts/aot/Markify.exe"
+          $out = "artifacts/selftest-aot.txt"
+          $p = Start-Process -FilePath $exe -ArgumentList '--selftest','--selftest-output',$out -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "AOT self-test timed out" }
+          if (-not (Test-Path $out)) { throw "no self-test report" }
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "AOT self-test failed ($($p.ExitCode))" }
+
+          # 防止 CI 悄悄跑回落到 JIT 的版本。
+          if ((Get-Content $out -Raw) -notmatch 'isAot \(approx\): yes') {
+            throw "not running under NativeAOT"
+          }
+
+      - name: Verify output layout
+        shell: pwsh
+        run: |
+          $nativeAllow = @('libSkiaSharp.dll','libHarfBuzzSharp.dll','libonigwrap.dll','av_libglesv2.dll')
+          $dlls = Get-ChildItem artifacts/aot -Filter *.dll -File
+          $unexpected = $dlls | Where-Object { $nativeAllow -notcontains $_.Name }
+          if ($unexpected) { throw "unexpected DLLs: $(($unexpected | ForEach-Object Name) -join ', ')" }
+          if (Test-Path artifacts/aot/Markify.dll) { throw "managed Markify.dll leaked into AOT output" }
+          Write-Host "OK: native binaries only"
+
+      # 发布包必须排除 PDB：合计约 200MB，且对最终用户无用。
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          $stage = "artifacts/pkg/Markify-$ver-win-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          Get-ChildItem artifacts/aot -File |
+            Where-Object { $_.Extension -ne '.pdb' } |
+            Copy-Item -Destination $stage
+
+          Copy-Item README.md $stage
+          Copy-Item docs/avalonia-markdown-client.md $stage -ErrorAction SilentlyContinue
+
+          $pkg = "artifacts/Markify-$ver-win-x64.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $pkg -CompressionLevel Optimal
+
+          $files = Get-ChildItem $stage -File
+          $size = ($files | Measure-Object Length -Sum).Sum
+          "-- package: {0:N1} MB ({1} files)" -f ((Get-Item $pkg).Length/1MB), $files.Count | Write-Host
+          $files | Sort-Object Length -Descending |
+            Select-Object Name, @{n='MB';e={'{0:N2}' -f ($_.Length/1MB)}} |
+            Format-Table | Out-String | Write-Host
+
+          # 校验解包后能跑（避免打包过程破坏目录结构）。
+          $check = "artifacts/pkgcheck"
+          Expand-Archive -Path $pkg -DestinationPath $check -Force
+          $exe = Get-ChildItem $check -Recurse -Filter Markify.exe | Select-Object -First 1
+          if (-not $exe) { throw "Markify.exe not found in package" }
+          $out = "artifacts/selftest-pkg.txt"
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--selftest','--selftest-output',$out -PassThru
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); throw "packaged self-test timed out" }
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "packaged binary failed self-test" }
+          Write-Host "OK: packaged binary runs"
+
+      - name: Generate checksum
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          $pkg = "artifacts/Markify-$ver-win-x64.zip"
+          $hash = (Get-FileHash $pkg -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path $pkg -Leaf)" | Out-File -Encoding ascii "artifacts/Markify-$ver-win-x64.zip.sha256"
+          Get-Content "artifacts/Markify-$ver-win-x64.zip.sha256"
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          $tag = "v$ver"
+          $notes = @"
+          Markify $ver — lightweight Markdown editor built on Avalonia.
+
+          **Requirements:** Windows 10/11 x64. No .NET runtime needed (NativeAOT).
+
+          **Contents:** Markify.exe plus four native libraries (Skia, HarfBuzz, onig, GLES).
+          SHA-256 checksum is attached for verification.
+          "@
+
+          gh release create $tag artifacts/Markify-$ver-win-x64.zip artifacts/Markify-$ver-win-x64.zip.sha256 `
+            --title "Markify $ver" --notes $notes --latest

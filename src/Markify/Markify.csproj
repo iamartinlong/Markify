@@ -7,6 +7,14 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AssemblyName>Markify</AssemblyName>
     <RootNamespace>Markify</RootNamespace>
+
+    <!-- 版本由 CI/CD 通过 -p:Version 覆盖；本地构建用这个默认值。 -->
+    <Version>0.1.0</Version>
+    <Product>Markify</Product>
+    <Description>Lightweight Markdown editor and preview client built on Avalonia.</Description>
+
+    <!-- NativeAOT 元数据：明确声明可裁剪/AOT 兼容，并保留 XAML 反射所需信息。 -->
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>
