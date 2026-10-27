@@ -311,7 +311,7 @@ partial void OnIsDarkThemeChanged(bool value)
 | 内存（30KB 文档） | 约 90–130MB（Avalonia + Skia 基线） |
 | 逐键输入延迟 | 无感（防抖后仅每 180ms 一次重解析） |
 | 发布体积（自包含 win-x64） | 约 60–80MB；开 trimming 后约 45–55MB |
-| **NativeAOT（win-x64）** | **`Markify.exe` 34.21MB，运行文件合计 52.72MB，zip 包 19.91MB**（见 §7.1） |
+| **NativeAOT（win-x64）** | **`Markify.exe` 34.21MB，运行文件合计 52.72MB，zip 19.91MB，安装包 15.04MB**（见 §7.1） |
 
 **体积优化建议**：
 
@@ -374,6 +374,16 @@ artifacts/aot/Markify.exe --selftest --selftest-output artifacts/selftest-aot.tx
 **发布流程（CD）**：`.github/workflows/release.yml` 由 `v*` tag 触发，链路为：构建 → JIT 自检 → AOT 发布 → AOT 自检（并断言 `isAot=yes`）→ 校验产物只含原生库 → 打包（排除 pdb）→ **解包后运行一次**（防止压缩破坏目录结构）→ 生成 SHA-256 → 创建 GitHub Release。
 
 v0.1.0 实测发布数据：zip 19.91 MB，解包后 52.72 MB / 5 个文件，本机运行 9/9 自检通过，GUI 正常启动，内存约 133 MB。
+
+**安装包（Inno Setup）**：v0.2.0 起同时发布 `setup.exe`（15.04 MB，LZMA2 压缩率高于是 zip）。便携 zip 无法注册文件关联，而「双击 `.md` 直接打开」正是 Markdown 编辑器的核心场景，这是引入安装包的动机。
+
+设计上有三处必须注意，都是实测踩出来的：
+
+1. **安装源用通配符，不要硬编码文件名**。AOT 产物是 exe + 4 个原生库，将来多一个库若漏装，SkiaSharp 会在启动时就抛 `DllNotFoundException`（不是退化，是直接崩溃）。
+2. **卸载必须还原关联，不能只删除**。最初用 `uninsdeletevalue`，卸载后 `.md` 变成空字符串——用户原本的 VSCode 关联丢失。改为安装时把原值备份到 `HKCU\Software\Markify\Backup`，卸载时写回。
+3. **清理备份键要用 `RegDeleteKeyIncludingSubkeys`**，且要在 `usPostUninstall` 阶段执行。`usUninstall` 阶段键还在被使用；普通 `RegDeleteKey` 只能删空键，会留下残留。
+
+验证结果（本机，`.md` 原本指向 `VSCode.md`）：安装后变为 `Markify.Markdown` → 双击 `.md` 由 Markify 打开 → 卸载后精确还原为 `VSCode.md`，且 ProgID、`Applications` 项、备份键、安装目录全部清除。CD 流程每次发布都会自动做同样的「安装→运行自检→卸载」冒烟测试。
 
 ---
 

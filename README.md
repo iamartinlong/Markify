@@ -111,8 +111,8 @@ artifacts/aot/Markify.exe --selftest --selftest-output artifacts/selftest-aot.tx
 
 | 工作流 | 触发 | 作用 |
 | --- | --- | --- |
-| `aot.yml` | push / PR | 每次提交验证 JIT 与 AOT 均可构建、自检通过 |
-| `release.yml` | `v*` tag | 构建 → 自检 → 打包（排除 pdb）→ 校验包内二进制 → 生成 SHA-256 → 创建 GitHub Release |
+| `aot.yml` | push / PR | 验证 JIT 与 AOT 均可构建、自检通过；编译安装脚本 |
+| `release.yml` | `v*` tag | 构建 → 自检 → 打包 zip → 构建安装包 → **实际安装/运行/卸载** → 校验和 → 创建 Release |
 
 发布新版本：
 
@@ -125,11 +125,51 @@ git push origin v0.2.0
 
 ## 下载
 
-从 [Releases](https://github.com/iamartinlong/Markify/releases) 下载 `Markify-<version>-win-x64.zip`，解压后直接运行 `Markify.exe`。
+从 [Releases](https://github.com/iamartinlong/Markify/releases) 下载，两种形式：
+
+| 形式 | 文件 | 体积 | 说明 |
+| --- | --- | --- | --- |
+| 安装版（推荐） | `Markify-<version>-setup.exe` | 15.0 MB | 开始菜单项 + Markdown 文件关联，卸载时恢复原关联 |
+| 便携版 | `Markify-<version>-win-x64.zip` | 19.9 MB | 解压即用，不写注册表 |
+
+均附带 `.sha256` 校验文件。
 
 - 需要 Windows 10/11 x64
 - **无需安装 .NET 运行时**（NativeAOT 自包含）
-- 压缩包内含 `.sha256` 校验文件
+- 安装版默认按用户安装，不弹 UAC；可在安装界面切换为全局安装
+
+### 安装包做了什么
+
+- 注册 `Markify.Markdown` ProgID，并加入 `.md` / `.markdown` 的「打开方式」候选
+- 「设为默认」是**可选**任务（默认勾选）；不选则只登记候选，不抢占现有默认程序
+- **卸载会把 `.md` 关联还原成安装前的值**，而不是留空
+- 安装程序语言：简体中文 / English
+
+```powershell
+# 静默安装（按用户、不建桌面图标）
+Markify-0.2.0-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NOICONS
+```
+
+### 安装包怎么构建
+
+`installer/markify.iss` 由 Inno Setup 6 编译，CI 通过 `choco install innosetup` 获取：
+
+```powershell
+dotnet publish src/Markify -c Release -r win-x64 -p:PublishAot=true -p:StripSymbols=true -o artifacts/aot
+
+# 组织 staging（排除 pdb）
+# ...
+
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+  "/DMyAppVersion=0.2.0" "/DStageDir=<staging 绝对路径>" "installer/markify.iss"
+```
+
+发布新版本：
+
+```powershell
+git tag -a v0.3.0 -m "Markify v0.3.0"
+git push origin v0.3.0
+```
 
 ## 许可
 
