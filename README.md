@@ -69,12 +69,43 @@ src/Markify/
 | 渲染 | MarkView.Avalonia 12.4.0（Markdig → 原生 Avalonia 控件） |
 | MVVM | CommunityToolkit.Mvvm 8.4.2 |
 
+发布：支持 NativeAOT（已实测，`Markify.exe` 34.2MB）。
+
 选型依据、与备选方案（Markdown.Avalonia、官方 Pro 控件、WebView）的对比、以及实现中遇到的 5 个关键坑，见 [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md)。
 
 ## 已知限制
 
 - 滚动同步当前为「按比例」，超长文档中源码行与预览内容会有轻微漂移（大纲导航可精确跳转）
 - 暂不支持多标签页、导出 PDF/HTML、所见即所得模式
+
+## NativeAOT
+
+本项目**已通过 NativeAOT 实测验证**（CI 在 `windows-latest` 上每次提交自动跑）：
+
+| 项目 | 实测 |
+| --- | --- |
+| `Markify.exe` | 34.21 MB |
+| 运行文件合计（不含 pdb） | 52.7 MB / 5 个文件 |
+| AOT 自检 | 9/9 通过 |
+| 裁剪 IL 警告 | 0 |
+
+```powershell
+dotnet publish src/Markify -c Release -r win-x64 -p:PublishAot=true -p:StripSymbols=true -o artifacts/aot
+```
+
+产物是 `Markify.exe` + 4 个原生库（Skia / HarfBuzz / onig / GLES），**不是严格单文件**。PDB 约 200MB，发布时需排除。
+
+### 自检模式
+
+编译通过不代表 AOT 能跑。应用内置 `--selftest`，在真实原生二进制里验证最易被裁剪破坏的 9 条路径（XAML 装载、AvaloniaEdit + TextMate、Markdig 解析、MarkView 控件树、主题模板 ScrollViewer、主题切换、CJK 字数、文件 IO）：
+
+```powershell
+artifacts/aot/Markify.exe --selftest --selftest-output artifacts/selftest-aot.txt
+```
+
+报告含 `isAot: yes/no`，用于确认跑的是 AOT 产物而非回落到 JIT。升级 Avalonia / MarkView 后建议重跑。
+
+详见 [docs/avalonia-markdown-client.md §7.1](docs/avalonia-markdown-client.md)。
 
 ## 许可
 

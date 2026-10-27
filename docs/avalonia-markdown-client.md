@@ -311,7 +311,7 @@ partial void OnIsDarkThemeChanged(bool value)
 | 内存（30KB 文档） | 约 90–130MB（Avalonia + Skia 基线） |
 | 逐键输入延迟 | 无感（防抖后仅每 180ms 一次重解析） |
 | 发布体积（自包含 win-x64） | 约 60–80MB；开 trimming 后约 45–55MB |
-| **NativeAOT（win-x64）** | **`Markify.exe` 34.2MB，运行文件合计约 52MB**（见 §7.1） |
+| **NativeAOT（win-x64）** | **`Markify.exe` 34.2MB，运行文件合计 52.7MB**（见 §7.1） |
 
 **体积优化建议**：
 
@@ -335,7 +335,8 @@ CI（`.github/workflows/aot.yml`）在 `windows-latest` 上跑通了完整链路
 | AOT 自检 9 项 | ✅ 9/9 通过 |
 | 确认为原生编译 | ✅ 报告 `isAot: yes`，`Assembly.Location` 为空 |
 | `Markify.exe` | 34.2 MB |
-| 运行文件合计（不含 pdb） | 约 52 MB |
+| 运行文件合计（不含 pdb） | 52.7 MB（5 个文件） |
+| 符号文件（不随发布分发） | 200.2 MB（3 个 pdb） |
 | 裁剪分析器 IL 警告 | 0（`TrimmerSingleWarn=false` 展开后） |
 
 **关键点：裁剪/编译通过不等于能跑，必须实际执行。** 本项目为此加了 `--selftest` 模式，在**真实原生二进制**里验证最易被裁剪破坏的 9 条路径：XAML 资源装载、AvaloniaEdit 文档与 TextMate transformer、Markdig 解析、MarkView 控件树构建（146 个可视后代 / 39 个 TextBlock）、主题模板里的 `PART_ScrollViewer`、主题切换、CJK 字数、文件 IO 往返。报告末尾的 `isAot` 标记用来防止「CI 悄悄跑了 JIT 版本」这种假通过。
@@ -343,19 +344,21 @@ CI（`.github/workflows/aot.yml`）在 `windows-latest` 上跑通了完整链路
 **AOT 产物的形态**（不要用「有没有 .dll」来判断）：
 
 ```
-Markify.exe            34.2 MB   ← 应用本身（含运行时）
-libSkiaSharp.dll       11.1 MB   ← 原生库
-libHarfBuzzSharp.dll   ~4 MB     ← 原生库
-libonigwrap.dll        ~1 MB     ← 原生库（TextMate 正则）
-av_libglesv2.dll       ~1 MB     ← 原生库（GLES）
+Markify.exe            34.21 MB  ← 应用本身（含运行时）
+libSkiaSharp.dll       11.09 MB  ← 原生库（2D 渲染）
+av_libglesv2.dll        5.14 MB  ← 原生库（GLES）
+libHarfBuzzSharp.dll    1.73 MB  ← 原生库（文本整形）
+libonigwrap.dll         0.52 MB  ← 原生库（TextMate 正则）
+                     ─────────
+                        52.7 MB  (5 个文件，不含 pdb)
 ```
 
 这四个 `.dll` 是**原生**动态库，AOT 应用本来就需要它们，发布时必须一起分发。真正需要断言的是「`Markify.dll` 这类托管程序集不存在」。
 
 **仍需注意**：
 
-- PDB 体积很大（`Markify.pdb` 100MB、`libSkiaSharp.pdb` 80MB），但**不随发布分发**；`StripSymbols=true` 只剥离 exe 自身符号，第三方 PDB 仍在，做发布包时需显式排除 `*.pdb`。
-- AOT 不是「单文件」：exe + 4 个原生 dll。若要求严格单文件需额外打包，与 AOT 无直接关系。
+- PDB 体积很大（合计 200MB：`Markify.pdb` 100MB、`libSkiaSharp.pdb` 80MB、`libHarfBuzzSharp.pdb` 20MB），但**不随发布分发**；`StripSymbols=true` 只剥离 exe 自身符号，第三方 PDB 仍在，做发布包时需显式排除 `*.pdb`。
+- AOT 不是「单文件」：exe + 4 个原生 dll（合计 5 个文件）。若要求严格单文件需额外打包，与 AOT 无直接关系。
 - 只在 `win-x64` 验证过。`osx-arm64` / `linux-x64` 未验证，跨平台 AOT 需各自跑一遍。
 - 应用使用 `Process`/反射的动态场景若以后引入（如插件加载），AOT 下会失效，需回来重跑自检。
 
