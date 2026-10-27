@@ -40,6 +40,46 @@ jobs:
           name: selftest-jit
           path: artifacts/selftest-jit.txt
 
+  # 阶段三：安装包脚本校验。
+  # Inno Setup 脚本的语法错误只会在打包时暴露，放一个便宜的任务在每次提交时跑，
+  # 避免等到发版才发现 .iss 写坏。
+  installer-script:
+    name: Installer script compiles
+    needs: jit-baseline
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build a throwaway staging copy
+        run: >
+          dotnet publish src/Markify -c Release -r win-x64 --self-contained true
+          -o artifacts/stage -v q
+
+      - name: Compile installer script
+        shell: pwsh
+        run: |
+          # choco 装到 Program Files，但本地可能装在 LOCALAPPDATA，两者都查一遍。
+          $candidates = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = (Get-ChildItem $candidates -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if (-not $iscc) { throw "ISCC.exe not found" }
+          $stage = (Resolve-Path "artifacts/stage").Path
+          & $iscc.FullName "/DMyAppVersion=0.0.0-ci" "/DStageDir=$stage" "installer/markify.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+          Get-ChildItem artifacts/installer -File |
+            Select-Object Name, @{n='MB';e={'{0:N1}' -f ($_.Length/1MB)}} |
+            Format-Table | Out-String | Write-Host
+
   # 阶段二：NativeAOT 发布 + 在真实原生二进制上跑同一套自检。
   # 这是本工作流的核心：编译通过不代表 AOT 能跑，必须实际执行。
   aot-build:

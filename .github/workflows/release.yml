@@ -157,6 +157,74 @@ jobs:
           "$hash  $(Split-Path $pkg -Leaf)" | Out-File -Encoding ascii "artifacts/Markify-$ver-win-x64.zip.sha256"
           Get-Content "artifacts/Markify-$ver-win-x64.zip.sha256"
 
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      # 安装包提供便携版 zip 没有的两项能力：文件关联和开始菜单项。
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          # choco 装到 Program Files，但本地可能装在 LOCALAPPDATA，两者都查一遍。
+          $candidates = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = (Get-ChildItem $candidates -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if (-not $iscc) { throw "ISCC.exe not found" }
+
+          # staging 复用已通过自检的 AOT 产物，确保安装包内容与已验证的二进制一致。
+          $stage = "artifacts/instage"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Get-ChildItem artifacts/aot -File |
+            Where-Object { $_.Extension -ne '.pdb' } |
+            Copy-Item -Destination $stage
+          Copy-Item README.md $stage
+          Copy-Item LICENSE.txt $stage
+          Copy-Item THIRD-PARTY-NOTICES.md $stage
+
+          & $iscc.FullName "/DMyAppVersion=$ver" "/DStageDir=$((Resolve-Path $stage).Path)" "installer/markify.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+
+          $setup = "artifacts/installer/Markify-$ver-setup.exe"
+          if (-not (Test-Path $setup)) { throw "installer not produced" }
+          "-- setup: {0:N2} MB" -f ((Get-Item $setup).Length/1MB) | Write-Host
+
+      - name: Smoke-test installer
+        shell: pwsh
+        run: |
+          # 真实安装 → 运行自检 → 卸载，确保安装包不是"能编译但装不上"。
+          $ver = '${{ steps.ver.outputs.version }}'
+          $setup = "artifacts/installer/Markify-$ver-setup.exe"
+          $target = "$env:LOCALAPPDATA\Programs\Markify"
+
+          $p = Start-Process -FilePath $setup `
+                 -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS',"/DIR=$target" `
+                 -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "install failed ($($p.ExitCode))" }
+          if (-not (Test-Path "$target/Markify.exe")) { throw "Markify.exe not installed" }
+
+          $out = "artifacts/selftest-installed.txt"
+          $r = Start-Process -FilePath "$target/Markify.exe" -ArgumentList '--selftest','--selftest-output',$out -PassThru
+          if (-not $r.WaitForExit(120000)) { $r.Kill(); throw "installed self-test timed out" }
+          Get-Content $out
+          if ($r.ExitCode -ne 0) { throw "installed binary failed self-test" }
+
+          $u = Start-Process -FilePath "$target/unins000.exe" `
+                 -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -PassThru -Wait
+          if ($u.ExitCode -ne 0) { throw "uninstall failed ($($u.ExitCode))" }
+          Write-Host "OK: install, run and uninstall all succeeded"
+
+      - name: Checksum installer
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          $setup = "artifacts/installer/Markify-$ver-setup.exe"
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path $setup -Leaf)" | Out-File -Encoding ascii "artifacts/Markify-$ver-setup.exe.sha256"
+          Get-Content "artifacts/Markify-$ver-setup.exe.sha256"
+
       - name: Create GitHub Release
         shell: pwsh
         env:
@@ -169,9 +237,21 @@ jobs:
 
           **Requirements:** Windows 10/11 x64. No .NET runtime needed (NativeAOT).
 
-          **Contents:** Markify.exe plus four native libraries (Skia, HarfBuzz, onig, GLES).
-          SHA-256 checksum is attached for verification.
+          **Assets**
+
+          - ``Markify-$ver-win-x64.zip`` — portable build, unzip and run.
+          - ``Markify-$ver-setup.exe`` — installer; adds a Start Menu entry and registers
+            Markdown file associations (opt-out). Removing it restores your previous
+            ``.md`` association.
+          - ``*.sha256`` — checksums for both.
+
+          Both variants ship the same binary: Markify.exe plus four native libraries
+          (Skia, HarfBuzz, onig, GLES).
           "@
 
-          gh release create $tag artifacts/Markify-$ver-win-x64.zip artifacts/Markify-$ver-win-x64.zip.sha256 `
+          gh release create $tag `
+            "artifacts/Markify-$ver-win-x64.zip" `
+            "artifacts/Markify-$ver-win-x64.zip.sha256" `
+            "artifacts/installer/Markify-$ver-setup.exe" `
+            "artifacts/Markify-$ver-setup.exe.sha256" `
             --title "Markify $ver" --notes $notes --latest
