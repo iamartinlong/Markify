@@ -137,7 +137,7 @@
                                    FontFamily="Cascadia Mono, Consolas, Menlo, monospace"
                                    FontSize="14"
                                    Background="Transparent"
-                                   Padding="8,8,0,8" />
+                                   Padding="8,8,0,0" />
                 </Border>
 
                 <GridSplitter x:Name="Splitter"

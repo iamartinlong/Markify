@@ -282,6 +282,43 @@ protected override async void OnClosing(WindowClosingEventArgs e)
 
 ---
 
+### B6. 给 `TextEditor` 设 Padding 会让行号栏一起内缩
+
+**现象** 🔬 实测
+
+编辑器底部的行号分隔线**提前 8px 断掉**，露出一小截"没有线也没有内容"的空白。像素测量：
+
+```
+分隔线结束 y=756   编辑区白底结束 y=764    → 差 8px
+```
+
+**根因**
+
+```xml
+<ae:TextEditor Padding="8,8,0,8" />
+```
+
+`TextEditor` 的 `Padding` 会内缩**整个编辑器内容**，行号栏（`LineNumberMargin`）是编辑器的一部分，所以它也跟着少掉底部 8px，无法贴合编辑区下边缘。
+
+**尝试过但无效的做法**：把 `Padding` 移到外层 `Border` 上——Border 的 padding 同样内缩整个子元素，问题一模一样。**换宿主不改变"内缩对象"这一事实。**
+
+**解法**
+
+如果有背景色需求，把"内容留白"和"颜色铺满"分开：
+
+```xml
+<!-- Padding 只给内容用；Bottom 设 0，让行号槽贴底 -->
+<ae:TextEditor Padding="8,8,0,0" Background="Transparent" />
+```
+
+修复后实测：分隔线 `y=764`，与编辑区底边**完全对齐**。
+
+**取舍说明**：去掉底部 padding 后，最后一行文字会稍微贴近底部（滚动到底时）。若想要"留白但线不断"，需要给 `TextView` 加自定义背景渲染器，或改用外层容器只给文字加 padding——本项目选简单方案，因为 8px 的视觉收益不值得引入自定义渲染。
+
+**排查手法**：行号/滚动条的"断口"类问题，量三个 y 值就能定位——**线终点 / 内容区终点 / 容器终点**。差值等于某处 padding 或 margin 时，就是内缩导致的。
+
+---
+
 ## C. 编辑器与预览的滚动同步
 
 这是本项目**最费时**的一块，连踩三个坑。三个坑彼此独立，任何一个没解决都会让同步完全失效。
@@ -847,6 +884,7 @@ assert($current -eq 'Sentinel.TestHandler')
 | 事件没触发 | 在回调里先写一行日志到文件（WinExe 无控制台，`Console` 不可见） |
 | 布局不生效 | 检查是不是只改了 `IsVisible` 而没改 Grid 轨道；确认有"初始应用"入口 |
 | 底部/右侧多出固定宽度空白 | 某个 `Height=0` 的轨道仍带 `MinHeight>0`，Grid 会按最小尺寸撑开（B3） |
+| 行号/滚动条线提前断开 | 量「线终点 / 内容区终点 / 容器终点」，差值是 padding 或 margin（B6） |
 | 滚动不同步 | 分别打印两侧的 `Offset / Extent / Viewport`，先确认 ratio 不是恒 0 |
 | AOT 崩溃 | 先手工跑 `--selftest`；再确认 `Assembly.Location` 是否为空（是否真 AOT） |
 | 安装包启动崩 | 检查 `{app}` 下原生库是否齐全（缺 Skia 必崩） |
