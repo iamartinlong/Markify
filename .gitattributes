@@ -1,0 +1,9 @@
+# 统一按 LF 存储，检出时 Windows 用 CRLF，避免跨平台换行噪音
+* text=auto
+*.cs text diff=csharp
+*.axaml text
+*.xaml text
+*.csproj text
+*.md text
+*.png binary
+*.ico binary

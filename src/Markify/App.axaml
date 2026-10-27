@@ -1,0 +1,45 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Markify.App"
+             RequestedThemeVariant="Default">
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="EditorBackground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="EditorForeground" Color="#1F2328" />
+                    <SolidColorBrush x:Key="ChromeBackground" Color="#F6F8FA" />
+                    <SolidColorBrush x:Key="ChromeBorder" Color="#D8DEE4" />
+                    <SolidColorBrush x:Key="PreviewBackground" Color="#FFFFFF" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="EditorBackground" Color="#1E1E1E" />
+                    <SolidColorBrush x:Key="EditorForeground" Color="#D4D4D4" />
+                    <SolidColorBrush x:Key="ChromeBackground" Color="#252526" />
+                    <SolidColorBrush x:Key="ChromeBorder" Color="#3C3C3C" />
+                    <SolidColorBrush x:Key="PreviewBackground" Color="#0D1117" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <!-- AvaloniaEdit 必需：编辑器模板与滚动条样式 -->
+        <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
+        <!-- MarkView 必需：MarkdownViewer 模板（文档滚动依赖它，缺失时无法滚动） -->
+        <StyleInclude Source="avares://MarkView.Avalonia/Themes/MarkdownTheme.axaml" />
+        <!-- 可选预设：GitHub 外观 -->
+        <StyleInclude Source="avares://MarkView.Avalonia/Themes/GitHubTheme.axaml" />
+
+        <Style Selector="Border.chrome">
+            <Setter Property="Background" Value="{DynamicResource ChromeBackground}" />
+        </Style>
+        <Style Selector="Border.statusbar">
+            <Setter Property="BorderThickness" Value="0,1,0,0" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
+            <Setter Property="Padding" Value="12,4" />
+        </Style>
+    </Application.Styles>
+</Application>
