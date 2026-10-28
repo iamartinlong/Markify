@@ -289,11 +289,16 @@ partial void OnIsDarkThemeChanged(bool value)
    **关键取舍**：视图侧只保留一个 `TextEditor`，切换标签时替换其 `Document`，而不是每个标签建一个编辑器——每个 `TextEditor` 都要装一套 TextMate 语法与 transformer，标签多时开销明显。
    代价：标签间共享语法高亮配置与查找面板状态（已记入 README 已知限制）。
 
-2. **导出 HTML / PDF**（2–3 天）
-   - HTML：`Markdig` 转 HTML + 内嵌 CSS 模板，一行 `File.WriteAllText`。零依赖，最容易。
-   - PDF：无原生 .NET 方案。可选 QuestPDF（社区版有限制）或走「HTML → 系统浏览器打印」。若要纯原生，可用 MarkView 离屏渲染到 `RenderTargetBitmap` 后分页——需要自己处理分页，建议先不做。
+2. ✅ **导出 HTML**（已完成）
+   Markdig 转 HTML + 内联 CSS + 本地图片内嵌 base64，产出可离线打开、可单独分发的单文件。
 
-3. **精确滚动同步**（3–5 天）
+3. ✅ **导出 PDF**（已完成）
+   没有引入第三方 PDF 库。**复用 HTML 导出**，交给系统 Edge/Chrome 的 `--headless --print-to-pdf` 打印。
+   理由：QuestPDF 等方案需要重新排版一遍 Markdown，等于维护第二套渲染器，样式会与 HTML/预览逐渐分叉；
+   而复用浏览器排版引擎能保证三者观感一致，且 Edge 在 Windows 10+ 上系统自带，零额外依赖。
+   代价：依赖外部浏览器（缺失时给明确提示）、纸张与页边距由浏览器决定。
+
+4. **精确滚动同步**（3–5 天）
    目前是比例同步。要做「行级」精确同步，需要在渲染后遍历预览控件树，记录每个 block 的 `Bounds.Y`，建立「源码行 → Y」的分段线性映射。MarkView 的 `MarkdownViewer` 没直接暴露 block 边界，可行路径是：拿 Markdig AST 的 `Block.Line` + 遍历可视树里带 `markdown-*` style class 的控件，按顺序配对。难度中等，收益是长文档体验明显提升。
 
 4. ✅ **文件监听 + 外部修改提示**（已完成）

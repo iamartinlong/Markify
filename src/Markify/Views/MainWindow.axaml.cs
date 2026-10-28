@@ -648,6 +648,23 @@ public partial class MainWindow : Window, IDocumentDialogService
         return file?.TryGetLocalPath();
     }
 
+    public async Task<string?> PickExportPdfPathAsync(string? suggestedPath)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "导出为 PDF",
+            SuggestedFileName = suggestedPath ?? "document.pdf",
+            DefaultExtension = "pdf",
+            ShowOverwritePrompt = true,
+            FileTypeChoices =
+            [
+                new FilePickerFileType("PDF") { Patterns = ["*.pdf"], MimeTypes = ["application/pdf"] },
+            ],
+        });
+
+        return file?.TryGetLocalPath();
+    }
+
     public Task ShowMessageAsync(string title, string message)
     {
         var tcs = new TaskCompletionSource();

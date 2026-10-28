@@ -306,6 +306,65 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
+    /// 导出当前文档为 PDF。
+    /// 复用 HTML 导出的排版（同一套 CSS + 内嵌图片），交给系统 Edge/Chrome 无头打印，
+    /// 因此 PDF 的观感与 HTML 导出、与预览一致。
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportPdfAsync()
+    {
+        if (Dialogs is null || ActiveDocument is not { } doc)
+            return;
+
+        var suggested = string.IsNullOrEmpty(doc.FilePath)
+            ? doc.DocumentName
+            : Path.GetFileNameWithoutExtension(doc.FilePath);
+
+        var target = await Dialogs.PickExportPdfPathAsync(suggested + ".pdf");
+        if (target is null)
+            return;
+
+        if (string.IsNullOrEmpty(Path.GetExtension(target)))
+            target += ".pdf";
+
+        try
+        {
+            StatusMessage = "正在生成 PDF…";
+
+            var documentDirectory = string.IsNullOrEmpty(doc.FilePath)
+                ? null
+                : Path.GetDirectoryName(Path.GetFullPath(doc.FilePath));
+
+            var html = MarkdownHtmlExporter.Render(
+                doc.SourceText,
+                documentDirectory,
+                doc.DocumentName,
+                IsDarkTheme);
+
+            var result = await PdfExporter.ExportAsync(html, target);
+
+            if (result.Success)
+            {
+                StatusMessage = $"已导出 {Path.GetFileName(target)}";
+                await Dialogs.ShowMessageAsync("导出完成", $"已导出到：\n{target}");
+            }
+            else
+            {
+                StatusMessage = "PDF 导出失败";
+                await Dialogs.ShowMessageAsync("PDF 导出失败", result.Error ?? "未知错误");
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"PDF 导出失败：{ex.Message}";
+            await Dialogs.ShowMessageAsync("PDF 导出失败", ex.Message);
+        }
+    }
+
+    /// <summary>当前环境是否具备 PDF 导出条件（供菜单禁用提示用）。</summary>
+    public bool CanExportPdf => PdfExporter.FindBrowser() is not null;
+
+    /// <summary>
     /// 导出当前文档为独立 HTML 文件。
     /// 与预览使用同一套 Markdig 管线，并把本地图片内嵌为 data URI，因此导出的文件可单独分发。
     /// </summary>

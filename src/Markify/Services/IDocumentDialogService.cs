@@ -19,6 +19,9 @@ public interface IDocumentDialogService
     /// <summary>选择 HTML 导出的目标路径，取消时返回 null。</summary>
     Task<string?> PickExportHtmlPathAsync(string? suggestedPath);
 
+    /// <summary>选择 PDF 导出的目标路径，取消时返回 null。</summary>
+    Task<string?> PickExportPdfPathAsync(string? suggestedPath);
+
     /// <summary>导出完成后的提示（失败时用于显示原因）。</summary>
     Task ShowMessageAsync(string title, string message);
 }
