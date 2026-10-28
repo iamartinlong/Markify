@@ -30,6 +30,7 @@
         <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+P" Command="{Binding TogglePreviewCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+E" Command="{Binding ExportHtmlCommand}" />
         <KeyBinding Gesture="Ctrl+F" Command="{Binding FindCommand}" />
         <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseTabCommand}" />
         <KeyBinding Gesture="Ctrl+Tab" Command="{Binding NextTabCommand}" />
@@ -45,6 +46,8 @@
                 <Separator />
                 <MenuItem Header="保存" Command="{Binding SaveCommand}" InputGesture="Ctrl+S" />
                 <MenuItem Header="另存为…" Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S" />
+                <Separator />
+                <MenuItem Header="导出为 HTML…" Command="{Binding ExportHtmlCommand}" InputGesture="Ctrl+Shift+E" />
                 <Separator />
                 <MenuItem Header="退出" Click="OnExitClick" />
             </MenuItem>

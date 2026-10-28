@@ -305,6 +305,53 @@ public partial class MainViewModel : ObservableObject
         await SaveDocumentAsync(doc, path);
     }
 
+    /// <summary>
+    /// 导出当前文档为独立 HTML 文件。
+    /// 与预览使用同一套 Markdig 管线，并把本地图片内嵌为 data URI，因此导出的文件可单独分发。
+    /// </summary>
+    [RelayCommand]
+    private async Task ExportHtmlAsync()
+    {
+        if (Dialogs is null || ActiveDocument is not { } doc)
+            return;
+
+        // 默认文件名与当前文档同名，扩展名换成 .html
+        var suggested = string.IsNullOrEmpty(doc.FilePath)
+            ? doc.DocumentName
+            : Path.GetFileNameWithoutExtension(doc.FilePath);
+
+        var target = await Dialogs.PickExportHtmlPathAsync(suggested + ".html");
+        if (target is null)
+            return;
+
+        if (string.IsNullOrEmpty(Path.GetExtension(target)))
+            target += ".html";
+
+        try
+        {
+            var documentDirectory = string.IsNullOrEmpty(doc.FilePath)
+                ? null
+                : Path.GetDirectoryName(Path.GetFullPath(doc.FilePath));
+
+            var html = MarkdownHtmlExporter.Render(
+                doc.SourceText,
+                documentDirectory,
+                doc.DocumentName,
+                IsDarkTheme);
+
+            await File.WriteAllTextAsync(target, html, new UTF8Encoding(false));
+
+            StatusMessage = $"已导出 {Path.GetFileName(target)}";
+            await Dialogs.ShowMessageAsync("导出完成",
+                $"已导出到：\n{target}\n\n本地图片已内嵌，文件可单独分发。");
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"导出失败：{ex.Message}";
+            await Dialogs.ShowMessageAsync("导出失败", ex.Message);
+        }
+    }
+
     private async Task SaveDocumentAsync(DocumentViewModel doc, string? path = null)
     {
         path ??= doc.FilePath;

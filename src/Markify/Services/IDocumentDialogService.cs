@@ -15,4 +15,10 @@ public interface IDocumentDialogService
 
     /// <summary>询问是否丢弃未保存修改，返回 true 表示可以继续。</summary>
     Task<bool> ConfirmDiscardAsync(string documentName);
+
+    /// <summary>选择 HTML 导出的目标路径，取消时返回 null。</summary>
+    Task<string?> PickExportHtmlPathAsync(string? suggestedPath);
+
+    /// <summary>导出完成后的提示（失败时用于显示原因）。</summary>
+    Task ShowMessageAsync(string title, string message);
 }

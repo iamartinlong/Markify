@@ -631,6 +631,64 @@ public partial class MainWindow : Window, IDocumentDialogService
         return file?.TryGetLocalPath();
     }
 
+    public async Task<string?> PickExportHtmlPathAsync(string? suggestedPath)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "导出为 HTML",
+            SuggestedFileName = suggestedPath ?? "document.html",
+            DefaultExtension = "html",
+            ShowOverwritePrompt = true,
+            FileTypeChoices =
+            [
+                new FilePickerFileType("HTML") { Patterns = ["*.html", "*.htm"], MimeTypes = ["text/html"] },
+            ],
+        });
+
+        return file?.TryGetLocalPath();
+    }
+
+    public Task ShowMessageAsync(string title, string message)
+    {
+        var tcs = new TaskCompletionSource();
+
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+
+        var ok = new Button { Content = "好", MinWidth = 88, IsDefault = true, IsCancel = true };
+        ok.Click += (_, _) => dialog.Close();
+        dialog.Closed += (_, _) => tcs.TrySetResult();
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = message,
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 16),
+                },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { ok },
+                },
+            },
+        };
+
+        dialog.ShowDialog(this);
+        return tcs.Task;
+    }
+
     public Task<bool> ConfirmDiscardAsync(string documentName)
     {
         var tcs = new TaskCompletionSource<bool>();
