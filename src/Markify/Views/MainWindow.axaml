@@ -112,41 +112,26 @@
                         <DataTemplate x:DataType="vm:DocumentViewModel">
                             <Border Classes="tab" Classes.active="{Binding IsActive}"
                                     CornerRadius="4,4,0,0"
-                                    ToolTip.Tip="{Binding TabToolTip}">
+                                    ToolTip.Tip="{Binding TabToolTip}"
+                                    PointerPressed="OnTabPointerPressed">
                                 <Border.ContextMenu>
-                                    <ContextMenu>
-                                        <!--
-                                          菜单项的命令都从 ItemsControl 的 DataContext 取（主 ViewModel），
-                                          CommandParameter 传当前标签，因此右键菜单作用于被右键的那个标签，
-                                          而不是当前活动标签。
-                                        -->
-                                        <MenuItem Header="保存"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SaveDocumentByIdCommand}"
-                                                  CommandParameter="{Binding}" />
-                                        <MenuItem Header="另存为…"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SaveAsDocumentCommand}"
-                                                  CommandParameter="{Binding}" />
+                                    <!--
+                                      ContextMenu 不在视觉树里：`$parent[ItemsControl]` 解析不到，
+                                      PlacementTarget 在 Opening 时也已是 null（均实测确认）。
+                                      因此改为在 PointerPressed 时记录被右键的标签，各菜单项从这里取。
+                                    -->
+                                    <ContextMenu x:Name="TabContextMenu" Opening="OnTabContextMenuOpening">
+                                        <MenuItem Header="保存" Click="OnTabMenuSave" />
+                                        <MenuItem Header="另存为…" Click="OnTabMenuSaveAs" />
                                         <Separator />
-                                        <MenuItem Header="打开所在文件夹"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).RevealInFileManagerCommand}"
-                                                  CommandParameter="{Binding}" />
-                                        <MenuItem Header="复制文件路径"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CopyFilePathCommand}"
-                                                  CommandParameter="{Binding}" />
+                                        <MenuItem Header="打开所在文件夹" Click="OnTabMenuReveal" />
+                                        <MenuItem Header="复制文件路径" Click="OnTabMenuCopyPath" />
                                         <Separator />
-                                        <MenuItem Header="关闭左侧标签"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseTabsToLeftCommand}"
-                                                  CommandParameter="{Binding}" />
-                                        <MenuItem Header="关闭右侧标签"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseTabsToRightCommand}"
-                                                  CommandParameter="{Binding}" />
-                                        <MenuItem Header="关闭其他标签"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseOtherTabsCommand}"
-                                                  CommandParameter="{Binding}" />
+                                        <MenuItem Header="关闭左侧标签" Click="OnTabMenuCloseLeft" />
+                                        <MenuItem Header="关闭右侧标签" Click="OnTabMenuCloseRight" />
+                                        <MenuItem Header="关闭其他标签" Click="OnTabMenuCloseOthers" />
                                         <Separator />
-                                        <MenuItem Header="关闭"
-                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseTabCommand}"
-                                                  CommandParameter="{Binding}" />
+                                        <MenuItem Header="关闭" Click="OnTabMenuClose" />
                                     </ContextMenu>
                                 </Border.ContextMenu>
                                 <StackPanel Orientation="Horizontal" Spacing="4">

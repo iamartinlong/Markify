@@ -63,9 +63,6 @@ public partial class FileTreeNode : CommunityToolkit.Mvvm.ComponentModel.Observa
         }
     }
 
-    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty]
-    public partial bool IsSelected { get; set; }
-
     public static FileTreeNode ForDirectory(string path) =>
         new(path, Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } n ? n : path,
             isDirectory: true);

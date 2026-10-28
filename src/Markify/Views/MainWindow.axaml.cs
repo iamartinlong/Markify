@@ -193,13 +193,145 @@ public partial class MainWindow : Window, IDocumentDialogService
         }
     }
 
+    // ---------- 标签右键菜单 ----------
+
+    /// <summary>
+    /// 从菜单项回溯出被右键的文档。
+    ///
+    /// ContextMenu 不在视觉树中，无法用相对绑定取 ViewModel 命令（实测：菜单项全部灰显、
+    /// 点击无反应）。改用 <see cref="ContextMenu.PlacementTarget"/>：它就是被右键的 Border，
+    /// 其 DataContext 正是该标签的 DocumentViewModel。
+    /// </summary>
+    /// <summary>
+    /// 菜单打开时记录被右键的标签。
+    ///
+    /// ContextMenu 不在视觉树里，无法用相对绑定取 ViewModel；而 PlacementTarget
+    /// 在 Click 触发时已被清空（实测）。Opening 是唯一既拿得到目标、又早于 Click 的时机。
+    /// </summary>
+    /// <summary>
+    /// 记录最近一次被右键的标签。
+    ///
+    /// ContextMenu 既不在视觉树里（相对绑定失效），PlacementTarget 在 Opening 时也已是 null
+    /// （实测确认），所以只能在右键按下时先记住目标，菜单项点击时再用。
+    /// </summary>
+    private DocumentViewModel? _contextMenuTarget;
+
+    private void OnTabPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+            return;
+
+        if (sender is Control { DataContext: DocumentViewModel doc })
+            _contextMenuTarget = doc;
+    }
+
+    private void OnTabContextMenuOpening(object? sender, CancelEventArgs e)
+    {
+        // 菜单在目标已消失（例如标签刚被关闭）时不应弹出
+        if (_contextMenuTarget is null && sender is ContextMenu menu)
+            menu.Tag = null;
+    }
+
+    private DocumentViewModel? GetMenuTargetDocument(object? sender) => _contextMenuTarget;
+
+    /// <summary>
+    /// 统一包装菜单动作。
+    ///
+    /// 这些处理器是 async void（事件签名要求），异常若逃逸会直接终结进程。
+    /// 内部虽有 try/catch，但链路上还包含弹窗、批量关闭等步骤，
+    /// 因此在这里做最后一道兜底，并用状态栏告知用户而不是静默吞掉。
+    /// </summary>
+    private async void RunMenuAction(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            if (_viewModel is not null)
+                _viewModel.StatusMessage = $"操作失败：{ex.Message}";
+        }
+    }
+
+    private void OnTabMenuSave(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        RunMenuAction(() => _viewModel.SaveDocumentByIdCommand.ExecuteAsync(doc));
+    }
+
+    private void OnTabMenuSaveAs(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        RunMenuAction(() => _viewModel.SaveAsDocumentCommand.ExecuteAsync(doc));
+    }
+
+    private void OnTabMenuReveal(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        try
+        {
+            _viewModel.RevealInFileManagerCommand.Execute(doc);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusMessage = $"操作失败：{ex.Message}";
+        }
+    }
+
+    private void OnTabMenuCopyPath(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        RunMenuAction(() => _viewModel.CopyFilePathCommand.ExecuteAsync(doc));
+    }
+
+    private void OnTabMenuCloseLeft(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        RunMenuAction(() => _viewModel.CloseTabsToLeftCommand.ExecuteAsync(doc));
+    }
+
+    private void OnTabMenuCloseRight(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        RunMenuAction(() => _viewModel.CloseTabsToRightCommand.ExecuteAsync(doc));
+    }
+
+    private void OnTabMenuCloseOthers(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        RunMenuAction(() => _viewModel.CloseOtherTabsCommand.ExecuteAsync(doc));
+    }
+
+    private void OnTabMenuClose(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || GetMenuTargetDocument(sender) is not { } doc)
+            return;
+
+        RunMenuAction(() => _viewModel.CloseTabCommand.ExecuteAsync(doc));
+    }
+
     // ---------- 文件树 ----------
 
     /// <summary>
     /// 单击 Markdown 文件即打开（预览）。文件夹不响应，交给 TreeView 自己的展开逻辑。
     /// 已打开的文档由 OpenPathAsync 内部切换到对应标签，不会重复打开。
     /// </summary>
-    private async void OnFileTreeSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    private void OnFileTreeSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_viewModel is null || FileTree.SelectedItem is not FileTreeNode node)
             return;
@@ -207,7 +339,7 @@ public partial class MainWindow : Window, IDocumentDialogService
         if (node.IsDirectory)
             return;
 
-        await _viewModel.OpenPathAsync(node.FullPath);
+        RunMenuAction(() => _viewModel.OpenPathAsync(node.FullPath));
     }
 
     /// <summary>

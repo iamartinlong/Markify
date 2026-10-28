@@ -1,3 +1,88 @@
+### B8. `ContextMenu` 不在视觉树里，相对绑定与 PlacementTarget 都拿不到目标
+
+**现象** 🔬 实测
+
+给标签加了右键菜单，绑定写成 `Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SaveCommand}"`。
+结果：**菜单能弹出，但每一项都是灰的**，点击毫无反应。
+
+**根因（两层，都实测确认）**
+
+1. `ContextMenu` 是弹出层，**不属于视觉树**，`$parent[ItemsControl]` 解析不到祖先，绑定失败 → `Command` 为 null → 菜单项禁用。
+2. 改用 `ContextMenu.PlacementTarget`（被右键的控件）看起来合理，但日志显示 **`Opening` 事件里它已经是 `null`**：
+
+```
+opening: placement=null tag=null
+click:   menu=ok          tag=null
+```
+
+**解法**：在**右键按下时**就记住目标，菜单项点击时再取。
+
+```csharp
+// XAML: Border.PointerPressed="OnTabPointerPressed"
+private DocumentViewModel? _contextMenuTarget;
+
+private void OnTabPointerPressed(object? sender, PointerPressedEventArgs e)
+{
+    if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+    if (sender is Control { DataContext: DocumentViewModel doc })
+        _contextMenuTarget = doc;
+}
+```
+
+菜单项的 `Click` 从 `_contextMenuTarget` 取值。实测通过：状态栏出现「已复制路径：…」。
+
+**注意**：`MenuItem.DataContext` 也不可靠（菜单内 DataContext 不一定继承到外层标签），不要依赖它。
+
+---
+
+### B9. `async void` 事件处理器必须自带异常兜底
+
+**问题** 🔬 实测
+
+右键菜单 7 个处理器、文件树选择、拖放等都是 `async void`（事件签名要求）。
+任何一个内部异常都会逃逸到 `SynchronizationContext`，**直接终结进程**——用户看到的是"点了菜单程序就没了"。
+
+**易被忽略的原因**：这些方法调用的 VM 方法内部大多有 try/catch，看起来是安全的；
+但链路中间还夹着**弹窗、批量关闭、文件 IO**，任何一环抛异常都到顶了。
+
+**解法**：统一包一层。
+
+```csharp
+private async void RunMenuAction(Func<Task> action)
+{
+    try { await action(); }
+    catch (Exception ex) { _viewModel.StatusMessage = $"操作失败：{ex.Message}"; }
+}
+```
+
+**要点**：不要静默吞掉——把原因写到状态栏，用户至少知道发生了什么。
+
+---
+
+### F10. 自动化验证失败时，先排除环境干扰
+
+**踩坑过程** 🔬 实测
+
+审计右键菜单时连续三次"失败"，每次都得出不同结论，全部是误判：
+
+| 现象 | 我的判断 | 真相 |
+| --- | --- | --- |
+| 菜单项灰显 | 绑定写错了 | ✅ 这个判断对了 |
+| 修复后仍不执行 | 绑定还是错 | 点击坐标落在**另一个程序的窗口**上 |
+| 键盘 Enter 也不执行 | 处理器没接上 | **剪贴板被其他程序占用**，`Get-Clipboard` 直接抛异常 |
+
+最后一次用**状态栏文本**而不是剪贴板验证，才得到确定结论。
+
+**教训**：
+
+1. **验证指标要选不受环境影响的**。剪贴板是全局共享资源，别的程序随时会占用；状态栏、日志文件才是本进程私有的。
+2. **窗口位置会漂移**。自动化点击前要 `SetWindowPos` + `SetForegroundWindow`，否则可能点到别处。
+3. 截图能证伪：`SuperPost` 窗口盖住了目标区域，一眼就能看出点击没打中。
+4. 与 F9 一起看：**F9 是工具静默失效，F10 是环境干扰**，两者都伪装成"功能没实现"。
+
+---
+
+
 # 实践经验与踩坑记录
 
 > 这份文档记录本项目开发过程中**实际遇到**的问题：现象、根因、解法，以及「下次怎么更快发现」。
