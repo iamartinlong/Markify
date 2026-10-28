@@ -1,3 +1,111 @@
+### F11. 用固定 `Task.Delay` 等异步事件，测试必然偶发失败
+
+**现象** 🔬 实测
+
+`FileChangeWatcherTests` 用 `await Task.Delay(150)` 等 `FileSystemWatcher` 就绪、
+`await Task.Delay(1500)` 等防抖窗口过去。表现是**偶发失败**：105 个用例里偶见 1 个失败，重跑即过。
+
+**根因**
+
+文件系统事件是异步的，到达时间取决于系统负载。固定 sleep 只是"多数时候够用"，
+负载高时事件还在路上，断言就提前执行了。
+
+**更糟的后果**：这类偶发失败会训练人养成"重跑一次就好"的习惯，
+从而掩盖真正的间歇性缺陷。审计时看到过一次失败又无法复现，**必须查清而不是跳过**。
+
+**解法**：轮询到条件成立，而不是睡固定时长。
+
+```csharp
+private static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+{
+    var deadline = DateTime.UtcNow + timeout;
+    while (DateTime.UtcNow < deadline)
+    {
+        if (condition()) return true;
+        await Task.Delay(25, TestContext.Current.CancellationToken);
+    }
+    return condition();
+}
+}
+```
+
+慢机器上只是慢一点，不会误判失败。修复后连跑 **10 次全通过**（此前 8 次里有 1–2 次失败）。
+
+**同一类问题**：`Thread.Sleep`、`WaitForExit(固定时间)`、UI 自动化里的"点完等 1 秒"——都是同一个模式。
+
+---
+
+### F12. 「没有任何反应」的断言必须配一个正向对照
+
+**背景** 🔬 实测
+
+`SuppressOwnWrite_DoesNotRaise` 原本只断言"抑制期间事件数为 0"。
+这条断言在 **watcher 完全没工作** 时也会通过——测试是绿的，功能是坏的。
+
+**解法**：加正向对照。先确认 watcher 能检测到探测写入，再断言抑制期间为 0，
+最后确认宽限期后能恢复检测。
+
+```csharp
+await EnsureWatchingAsync(watcher, path, () => Volatile.Read(ref raised));  // 先证明能用
+var baseline = Volatile.Read(ref raised);
+using (watcher.SuppressOwnWrite()) { /* 写入 */ }
+Assert.Equal(0, Volatile.Read(ref raised) - baseline);                     // 抑制有效
+await Task.Delay(700);                                                      // 等宽限期结束
+await File.WriteAllTextAsync(path, "external");
+Assert.True(await WaitUntilAsync(() => Volatile.Read(ref raised) > before)); // 能恢复
+```
+
+**加上正向对照后，这个测试立刻暴露了一个真实产品缺陷**（见 F13）。
+
+**推广**：凡是断言"不发生 X"的测试，都要先证明"在正常条件下 X 会发生"。
+否则它只能证明"代码没抛异常"，不能证明行为正确。
+
+---
+
+### F13. 用「布尔开关 + 延迟解除」抑制事件，会吞掉宽限期内的真实事件
+
+**现象** 🔬 实测（由 F12 的正向对照发现）
+
+自身保存时需要抑制文件监听，避免误报"文件被外部修改"。原实现是：
+
+```csharp
+// 抑制开始 → 置 true
+_owner._ownWriteInProgress = true;
+
+// Dispose 时延迟 500ms 再置 false
+_ = Task.Delay(500).ContinueWith(_ => _owner._ownWriteInProgress = false, ...);
+```
+
+**缺陷**：这 500ms 内发生的一切文件事件都被当作"自身写入"丢弃。
+真实场景——**保存后立刻被外部工具（如 git、格式化器）修改**——那次修改会被静默忽略，
+用户以为文件是最新的，实际不是。
+
+**解法**：改用时间戳窗口。
+
+```csharp
+private long _ownWriteTicks;   // 最近一次自身写入的时刻
+private static readonly TimeSpan OwnWriteGrace = TimeSpan.FromMilliseconds(500);
+
+private bool InOwnWriteGrace
+{
+    get
+    {
+        var ticks = Interlocked.Read(ref _ownWriteTicks);
+        return ticks != 0 && DateTime.UtcNow.Ticks - ticks < OwnWriteGrace.Ticks;
+    }
+}
+```
+
+写入时刷新时间戳，事件到达时比较**距上次写入多久**。
+仍然是 500ms 的宽限，但语义从"这段时间内一律忽略"变成"忽略紧跟着自身写入的事件"——
+宽限期结束后到达的事件照常上报。
+
+**要点**：抑制"自己的操作"时，优先用**时间窗口**而不是**全局开关**。
+开关的问题在于它的作用域是"时间上的一个区间"，而真实事件并不遵守你划的边界。
+
+---
+
+
 ### B8. `ContextMenu` 不在视觉树里，相对绑定与 PlacementTarget 都拿不到目标
 
 **现象** 🔬 实测

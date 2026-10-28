@@ -123,7 +123,17 @@ CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提�
 
 选型依据、与备选方案（Markdown.Avalonia、官方 Pro 控件、WebView）的对比，见 [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md)。
 
-开发中实际踩的坑与排查手法（滚动同步、AOT、安装包、文件关联等 20+ 条），见 [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md)。
+开发中实际踩的坑与排查手法（滚动同步、AOT、安装包、文件关联等 30+ 条），见 [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md)。
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/todo.md](docs/todo.md) | **待办与下一步计划**（接手先看这个） |
+| [docs/worklog.md](docs/worklog.md) | 已完成工作、决策记录与被推翻的判断 |
+| [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md) | 30+ 条踩坑与排查手法 |
+| [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md) | 选型依据与架构 |
+| [docs/logo.md](docs/logo.md) | 图标设计与替换步骤 |
 
 ## 测试
 
@@ -132,7 +142,7 @@ dotnet build tests/Markify.Tests
 dotnet run --project tests/Markify.Tests
 ```
 
-46 个单元测试，覆盖大纲锚点生成、中英文混排字数统计、文件编码/BOM 往返、外部修改监听（防抖与自身写入抑制）。
+105 个用例，覆盖大纲锚点生成、中英文混排字数统计、文件编码/BOM 往返、外部修改监听（防抖与自身写入抑制）、多标签工作区与批量关闭、目录树过滤与懒加载、HTML 导出（图片内嵌、details 块）、PDF 导出（字体嵌入、分页）。
 
 > 注意：xunit.v3 使用 Microsoft.Testing.Platform 作为宿主。.NET 10 的 `dotnet test` 对 MTP 的集成尚不稳定（会报「运行了零个测试」），因此用 `dotnet run --project` 运行，CI 亦如此。
 

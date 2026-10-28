@@ -1,0 +1,165 @@
+# 待办事项
+
+> 最后更新：2026-10-28（v0.5.0 发布后）
+>
+> 这份文档是**下一步工作**的唯一来源。已完成的功能见 [工作日志](worklog.md)，踩过的坑见 [pitfalls-and-practices.md](pitfalls-and-practices.md)。
+
+## 怎么用这份文档
+
+- **接手项目时**：先读 §1 现状，再按 §2 的优先级决定做什么。
+- 每完成一项，把条目移到 [worklog.md](worklog.md)，**不要直接删除**——保留决策记录对后来者有参考价值。
+- 优先级定义：**P0** 阻断使用 / **P1** 明显影响日常 / **P2** 体验优化 / **P3** 锦上添花。
+
+---
+
+## 1. 项目现状（交接必读）
+
+| 项 | 值 |
+| --- | --- |
+| 最新版本 | **v0.5.0** |
+| 源码 | 16 个 `.cs` 文件，约 3600 行 |
+| 测试 | **86 个测试方法 / 105 个用例**（xunit.v3），全部通过 |
+| 自检 | **10 项**，JIT 与 NativeAOT 均通过 |
+| 发布物 | 便携 zip（20 MB）+ 安装包（15 MB），均含 SHA-256 |
+| 技术栈 | .NET 10 / Avalonia 12.1.4 / AvaloniaEdit 12.0.0 / MarkView 12.4.0 |
+| 构建警告 | 0 |
+
+### 已具备的能力
+
+分栏实时预览、双向滚动同步、大纲导航、多标签页、文件夹目录树、标签右键菜单、查找替换、外部修改检测、导出 HTML、导出 PDF、明暗主题、NativeAOT 发布、Inno Setup 安装包（含文件关联）。
+
+### 关键约束（改动前必须知道）
+
+1. **三个 `StyleInclude` 缺一不可**（`App.axaml`）。缺 MarkView 的 `MarkdownTheme.axaml` 时预览**能渲染但不能滚动**，没有报错。
+2. **所有标签共用一个 `TextEditor`**，切换时替换 `TextDocument`。这保证了撤销栈隔离，也意味着标签间共享语法高亮配置与查找面板状态。
+3. **AOT 是发布路径**。任何引入反射、动态代码的新依赖都必须重跑 `--selftest`，单元测试在 JIT 下跑，证明不了 AOT 可用。
+4. **`ContextMenu` 不在视觉树里**，相对绑定与 `PlacementTarget` 都拿不到目标（详见 pitfalls B8）。
+
+---
+
+## 2. 待办清单
+
+### P1 — 明显影响日常使用
+
+#### P1-1. 打开文件夹后不记忆，重启需重新打开
+
+- **现状**：每次启动都要 `Ctrl+Shift+O` 重选文件夹。
+- **建议**：在退出时把 `FolderPath` 和最近打开的文件列表写入本地配置，启动时恢复。
+- **落点**：新增 `Services/AppSettingsService.cs`，配置放 `%LOCALAPPDATA%\Markify\settings.json`。
+- **注意**：配置损坏不能导致启动失败，读取失败就当作空配置。
+
+#### P1-2. 单击目录树文件即打开，缺少"预览态"
+
+- **现状**：单击直接开标签，浏览大量文件时容易堆积标签。
+- **建议**：引入"临时标签"概念（斜体显示），单击复用同一个临时标签，双击转为常驻。与 VS Code 一致。
+- **落点**：`DocumentViewModel` 加 `IsPreview`，`MainViewModel.OpenPathAsync` 增加 `preview: bool` 参数。
+- **成本**：约 1 天，涉及标签状态机，改动面较大。
+
+#### P1-3. 没有"最近打开的文件"
+
+- **现状**：文件菜单只有"打开…"，需要从对话框里翻目录。
+- **建议**：文件菜单加"最近打开"子菜单，保留最近 10 个；同时支持把文件拖到任务栏图标打开（Windows JumpList，可选）。
+- **依赖**：与 P1-1 共用配置存储，建议一起做。
+
+### P2 — 体验优化
+
+#### P2-1. 精确滚动同步
+
+- **现状**：按比例同步，长文档中源码行与预览内容会逐渐漂移（代码块高度差异大时明显）。
+- **建议**：解析后建立「源码行 → 预览 Y 坐标」分段映射。需要遍历预览可视树里带 `markdown-*` class 的控件，与 Markdig AST 的 `Block.Line` 按顺序配对。
+- **成本**：3–5 天，是本项目剩余项里最难的。
+- **备注**：目前靠大纲锚点跳转补偿，日常够用，因此不是 P1。
+
+#### P2-2. 导出时不做代码语法高亮
+
+- **现状**：导出的 HTML / PDF 里代码块是朴素等宽样式，而预览有 TextMate 着色。
+- **原因**：Highlight.js 需要 CDN（离线失效）或内嵌约 100KB 脚本。
+- **建议**：如果要做，选择**内嵌精简版**（只打包常用语言）而不是 CDN——导出文件的卖点就是离线可用。
+- **成本**：1–2 天（含体积验证）。
+
+#### P2-3. 导出 HTML 的 `<details>` 不支持嵌套
+
+- **原因**：Markdig 的 HTML 渲染器不认 MarkView 的 `DetailsBlock`，当前用正则抽取还原，无法处理嵌套。
+- **建议**：改为遍历 AST 自行生成 HTML，而不是正则替换。
+- **成本**：半天。触发概率低（嵌套 details 少见），优先级不高。
+
+#### P2-4. 预览区不支持查找
+
+- **现状**：`Ctrl+F` 只作用于源码编辑器。
+- **建议**：MarkView 提供 `MarkdownViewer.Find(...)`，可接到同一个查找框。
+- **成本**：半天。
+
+### P3 — 锦上添花
+
+#### P3-1. 真实 Logo
+
+- **现状**：当前是占位设计（深靛蓝圆角方块 + 白色 M + 琥珀圆点）。
+- **替换方法**：见 [logo.md](logo.md)，覆盖 `src/Markify/Assets/` 下三个文件即可，然后删除 `tools/LogoGen` 与 CI 里的 `Verify logo assets` 步骤。
+
+#### P3-2. WYSIWYG 模式
+
+- **评估**：需要 Avalonia Pro 的 `RichTextEditor` + `Avalonia.Controls.Markdown`（商业授权）。
+- **不建议自研**：那等于写一个 Markdown 感知的富文本编辑器，成本远超收益。
+- 若确实要做，**新建分支**试验，不要动主干的分栏模式。
+
+#### P3-3. 跨平台验证
+
+- **现状**：只在 `win-x64` 验证过，CI 也只跑 Windows。
+- **建议**：如需 macOS / Linux，`release.yml` 加 `matrix`（`osx-arm64` / `linux-x64`），AOT 需各自验证。
+- **注意**：`PdfExporter` 依赖 Edge/Chrome，Linux 上通常没有预装，需要探测 `google-chrome` / `chromium`。
+
+#### P3-4. 多语言界面
+
+- **现状**：界面文案硬编码中文。
+- **建议**：如要做，用 `.resx` 或 Avalonia 的资源字典；`Settings` 里存语言偏好。
+
+---
+
+## 3. 已知技术债
+
+| 项 | 说明 | 影响 |
+| --- | --- | --- |
+| `MarkdownOutline` 用 `UseAdvancedExtensions` | 与预览的 `UseGitHubExtensions` 不完全一致，某些扩展语法下大纲行号可能与预览锚点不符 | 低，实测常见语法无问题 |
+| `MarkdownHtmlExporter` 的手写 SVG/CSS 与位图双份定义 | 位图和 SVG 的几何是两处（`Render` 与 `BuildSvg`），改一处要手工同步 | 低，CI 能校验产物与生成器一致，但校验不了"位图与 SVG 构图一致" |
+| 主窗口代码后置较大 | `MainWindow.axaml.cs` 约 1000 行，包含滚动同步、文件树、菜单、对话框 | 中，继续加功能前建议拆分 |
+| 无 UI 自动化测试 | 交互靠人工验证，历史上多次因工具缺陷误判（见 pitfalls F9/F10） | 中，UI 回归全靠自觉 |
+
+---
+
+## 4. 接手检查清单
+
+第一次接手时按顺序跑一遍，确认环境可用：
+
+```powershell
+# 1. 构建（应 0 警告）
+dotnet build src/Markify -c Release
+
+# 2. 单元测试（应 105 个用例全部通过）
+dotnet build tests/Markify.Tests
+dotnet run --project tests/Markify.Tests
+
+# 3. 自检（应 10 通过）
+src/Markify/bin/Release/net10.0/Markify.exe --selftest --selftest-output selftest.txt
+Get-Content selftest.txt
+
+# 4. 安装包脚本能编译（需要 Inno Setup 6）
+#    见 .github/workflows/aot.yml 的 installer-script job
+```
+
+发布流程（详见 README）：
+
+```powershell
+git tag -a v0.6.0 -m "..."
+git push origin v0.6.0      # 触发 release.yml：构建 → 自检 → 打包 → 建 Release
+```
+
+---
+
+## 5. 相关文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [worklog.md](worklog.md) | 已完成工作与决策记录（按版本） |
+| [pitfalls-and-practices.md](pitfalls-and-practices.md) | 30+ 条踩坑与排查手法，**改代码前建议先翻** |
+| [avalonia-markdown-client.md](avalonia-markdown-client.md) | 选型依据、架构、四种渲染方案对比 |
+| [logo.md](logo.md) | 图标设计与替换步骤 |
