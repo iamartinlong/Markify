@@ -131,6 +131,8 @@ CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提�
 | --- | --- |
 | [docs/todo.md](docs/todo.md) | **现状与路线图**（接手先看这个） |
 | [docs/worklog.md](docs/worklog.md) | 已完成工作、决策记录与被推翻的判断 |
+| [docs/ui-optimization.md](docs/ui-optimization.md) | **UI 优化方案**（问题实测 + 设计令牌 + 三期计划，未实施） |
+| [docs/vscode-style-discussion.md](docs/vscode-style-discussion.md) | **是否做成 VS Code 风格**（三层拆解 + 空间账 + 决策建议） |
 | [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md) | 40 条踩坑与排查手法 |
 | [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md) | 选型依据与架构 |
 | [docs/logo.md](docs/logo.md) | 图标设计与替换步骤 |

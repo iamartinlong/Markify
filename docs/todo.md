@@ -46,6 +46,19 @@
 
 ### P1 — 明显影响日常使用
 
+> 新增 **P1-0：UI 视觉与交互优化**，详见 [ui-optimization.md](ui-optimization.md)；
+> 风格选型讨论见 [vscode-style-discussion.md](vscode-style-discussion.md)。
+> 这条比下面的 P1-1~P1-3 更显眼——"界面简陋"是用户打开就看到的，而文件夹记忆只是操作繁琐。
+
+#### P1-0. UI 视觉与交互优化（**方向已定，未实施**）
+
+- **现状**：深色主题存在三处视觉断裂（标题栏仍白、菜单栏纯黑、编辑器与预览两套深色）；次要文字靠 `Opacity` 压暗，浅色主题下 2 处对比度不达标；工具栏 11 个按钮无图标无悬停态；目录树用彩色 emoji 与 Fluent 线性风格冲突。
+- **根因**：`App.axaml` 只有 5 个语义色键，缺少层级色 / 次级文字色 / 状态色，只好用 `Opacity`、边框线和硬编码色值（`#40FF0000`）替代。
+- **风格已定**（2026-10-28）：**"精致 Markdown 工具"而非 VS Code 插件**——采用 VS Code 的骨架（两层底色 + 细线分区 + 半透明状态）与自有强调色，**不做活动栏、不做 IDE 式布局**。定稿令牌与实测值见 [vscode-style-discussion.md](vscode-style-discussion.md) §7。
+- **方案**：[ui-optimization.md](ui-optimization.md) 给出问题清单（含实测数值）、实施计划与不建议做的事。
+- **成本**：视觉层约 1 天（修断裂 + 建令牌），命令面板约 1 天，标签栏紧凑化约 0.5 天；合计约 2.5 天，分两期。
+- **注意**：不要动 MarkView 包内的 Markdown 样式；不要引入图标字体包（AOT 风险）；**次级文字不可用在交互行上**（会与半透明状态色冲突，详见讨论稿 §7）；改前先截基线图（项目无 UI 自动化测试）。
+
 #### P1-1. 打开文件夹后不记忆，重启需重新打开
 
 - **现状**：每次启动都要 `Ctrl+Shift+O` 重选文件夹。
@@ -168,6 +181,8 @@ git push origin v0.6.0      # 触发 release.yml：构建 → 自检 → 打包 
 | 文档 | 内容 |
 | --- | --- |
 | [worklog.md](worklog.md) | 已完成工作与决策记录（按版本） |
+| [ui-optimization.md](ui-optimization.md) | **UI 优化方案**（问题实测 + 设计令牌 + 三期计划，未实施） |
+| [vscode-style-discussion.md](vscode-style-discussion.md) | **是否做成 VS Code 风格**（三层拆解 + 空间账 + 决策建议，讨论稿） |
 | [pitfalls-and-practices.md](pitfalls-and-practices.md) | 40 条踩坑与排查手法，**改代码前建议先翻** |
 | [avalonia-markdown-client.md](avalonia-markdown-client.md) | 选型依据、架构、四种渲染方案对比 |
 | [logo.md](logo.md) | 图标设计与替换步骤 |
