@@ -1,6 +1,6 @@
 # 待办事项
 
-> 最后更新：2026-10-28（v0.5.0 发布后）
+> 最后更新：2026-10-28（v0.5.1 发布后）
 >
 > 这份文档是**下一步工作**的唯一来源。已完成的功能见 [工作日志](worklog.md)，踩过的坑见 [pitfalls-and-practices.md](pitfalls-and-practices.md)。
 
@@ -16,9 +16,9 @@
 
 | 项 | 值 |
 | --- | --- |
-| 最新版本 | **v0.5.0** |
-| 源码 | 16 个 `.cs` 文件，约 3600 行 |
-| 测试 | **86 个测试方法 / 105 个用例**（xunit.v3），全部通过 |
+| 最新版本 | **v0.5.1**（纯修复版） |
+| 源码 | 16 个 `.cs` 文件（不含 `obj/`），约 3100 行 |
+| 测试 | **86 个测试方法 / 105 个用例**（xunit.v3），全部通过；时序相关用例已改为轮询，连跑 10 次稳定 |
 | 自检 | **10 项**，JIT 与 NativeAOT 均通过 |
 | 发布物 | 便携 zip（20 MB）+ 安装包（15 MB），均含 SHA-256 |
 | 技术栈 | .NET 10 / Avalonia 12.1.4 / AvaloniaEdit 12.0.0 / MarkView 12.4.0 |
@@ -123,6 +123,7 @@
 | `MarkdownHtmlExporter` 的手写 SVG/CSS 与位图双份定义 | 位图和 SVG 的几何是两处（`Render` 与 `BuildSvg`），改一处要手工同步 | 低，CI 能校验产物与生成器一致，但校验不了"位图与 SVG 构图一致" |
 | 主窗口代码后置较大 | `MainWindow.axaml.cs` 约 1000 行，包含滚动同步、文件树、菜单、对话框 | 中，继续加功能前建议拆分 |
 | 无 UI 自动化测试 | 交互靠人工验证，历史上多次因工具缺陷误判（见 pitfalls F9/F10） | 中，UI 回归全靠自觉 |
+| `FileChangeWatcher` 的 500ms 宽限期 | 抑制自身写入用的是时间戳窗口（v0.5.1 修复）。保存后 500ms 内到达的外部修改仍会被当作自身写入忽略 | 低，但极快的"保存即被格式化"场景可能漏报。若要彻底解决，需按写入内容/大小比对而非纯时间判断 |
 
 ---
 
@@ -160,6 +161,6 @@ git push origin v0.6.0      # 触发 release.yml：构建 → 自检 → 打包 
 | 文档 | 内容 |
 | --- | --- |
 | [worklog.md](worklog.md) | 已完成工作与决策记录（按版本） |
-| [pitfalls-and-practices.md](pitfalls-and-practices.md) | 30+ 条踩坑与排查手法，**改代码前建议先翻** |
+| [pitfalls-and-practices.md](pitfalls-and-practices.md) | 40 条踩坑与排查手法，**改代码前建议先翻** |
 | [avalonia-markdown-client.md](avalonia-markdown-client.md) | 选型依据、架构、四种渲染方案对比 |
 | [logo.md](logo.md) | 图标设计与替换步骤 |

@@ -1,196 +1,3 @@
-### F11. 用固定 `Task.Delay` 等异步事件，测试必然偶发失败
-
-**现象** 🔬 实测
-
-`FileChangeWatcherTests` 用 `await Task.Delay(150)` 等 `FileSystemWatcher` 就绪、
-`await Task.Delay(1500)` 等防抖窗口过去。表现是**偶发失败**：105 个用例里偶见 1 个失败，重跑即过。
-
-**根因**
-
-文件系统事件是异步的，到达时间取决于系统负载。固定 sleep 只是"多数时候够用"，
-负载高时事件还在路上，断言就提前执行了。
-
-**更糟的后果**：这类偶发失败会训练人养成"重跑一次就好"的习惯，
-从而掩盖真正的间歇性缺陷。审计时看到过一次失败又无法复现，**必须查清而不是跳过**。
-
-**解法**：轮询到条件成立，而不是睡固定时长。
-
-```csharp
-private static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
-{
-    var deadline = DateTime.UtcNow + timeout;
-    while (DateTime.UtcNow < deadline)
-    {
-        if (condition()) return true;
-        await Task.Delay(25, TestContext.Current.CancellationToken);
-    }
-    return condition();
-}
-}
-```
-
-慢机器上只是慢一点，不会误判失败。修复后连跑 **10 次全通过**（此前 8 次里有 1–2 次失败）。
-
-**同一类问题**：`Thread.Sleep`、`WaitForExit(固定时间)`、UI 自动化里的"点完等 1 秒"——都是同一个模式。
-
----
-
-### F12. 「没有任何反应」的断言必须配一个正向对照
-
-**背景** 🔬 实测
-
-`SuppressOwnWrite_DoesNotRaise` 原本只断言"抑制期间事件数为 0"。
-这条断言在 **watcher 完全没工作** 时也会通过——测试是绿的，功能是坏的。
-
-**解法**：加正向对照。先确认 watcher 能检测到探测写入，再断言抑制期间为 0，
-最后确认宽限期后能恢复检测。
-
-```csharp
-await EnsureWatchingAsync(watcher, path, () => Volatile.Read(ref raised));  // 先证明能用
-var baseline = Volatile.Read(ref raised);
-using (watcher.SuppressOwnWrite()) { /* 写入 */ }
-Assert.Equal(0, Volatile.Read(ref raised) - baseline);                     // 抑制有效
-await Task.Delay(700);                                                      // 等宽限期结束
-await File.WriteAllTextAsync(path, "external");
-Assert.True(await WaitUntilAsync(() => Volatile.Read(ref raised) > before)); // 能恢复
-```
-
-**加上正向对照后，这个测试立刻暴露了一个真实产品缺陷**（见 F13）。
-
-**推广**：凡是断言"不发生 X"的测试，都要先证明"在正常条件下 X 会发生"。
-否则它只能证明"代码没抛异常"，不能证明行为正确。
-
----
-
-### F13. 用「布尔开关 + 延迟解除」抑制事件，会吞掉宽限期内的真实事件
-
-**现象** 🔬 实测（由 F12 的正向对照发现）
-
-自身保存时需要抑制文件监听，避免误报"文件被外部修改"。原实现是：
-
-```csharp
-// 抑制开始 → 置 true
-_owner._ownWriteInProgress = true;
-
-// Dispose 时延迟 500ms 再置 false
-_ = Task.Delay(500).ContinueWith(_ => _owner._ownWriteInProgress = false, ...);
-```
-
-**缺陷**：这 500ms 内发生的一切文件事件都被当作"自身写入"丢弃。
-真实场景——**保存后立刻被外部工具（如 git、格式化器）修改**——那次修改会被静默忽略，
-用户以为文件是最新的，实际不是。
-
-**解法**：改用时间戳窗口。
-
-```csharp
-private long _ownWriteTicks;   // 最近一次自身写入的时刻
-private static readonly TimeSpan OwnWriteGrace = TimeSpan.FromMilliseconds(500);
-
-private bool InOwnWriteGrace
-{
-    get
-    {
-        var ticks = Interlocked.Read(ref _ownWriteTicks);
-        return ticks != 0 && DateTime.UtcNow.Ticks - ticks < OwnWriteGrace.Ticks;
-    }
-}
-```
-
-写入时刷新时间戳，事件到达时比较**距上次写入多久**。
-仍然是 500ms 的宽限，但语义从"这段时间内一律忽略"变成"忽略紧跟着自身写入的事件"——
-宽限期结束后到达的事件照常上报。
-
-**要点**：抑制"自己的操作"时，优先用**时间窗口**而不是**全局开关**。
-开关的问题在于它的作用域是"时间上的一个区间"，而真实事件并不遵守你划的边界。
-
----
-
-
-### B8. `ContextMenu` 不在视觉树里，相对绑定与 PlacementTarget 都拿不到目标
-
-**现象** 🔬 实测
-
-给标签加了右键菜单，绑定写成 `Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SaveCommand}"`。
-结果：**菜单能弹出，但每一项都是灰的**，点击毫无反应。
-
-**根因（两层，都实测确认）**
-
-1. `ContextMenu` 是弹出层，**不属于视觉树**，`$parent[ItemsControl]` 解析不到祖先，绑定失败 → `Command` 为 null → 菜单项禁用。
-2. 改用 `ContextMenu.PlacementTarget`（被右键的控件）看起来合理，但日志显示 **`Opening` 事件里它已经是 `null`**：
-
-```
-opening: placement=null tag=null
-click:   menu=ok          tag=null
-```
-
-**解法**：在**右键按下时**就记住目标，菜单项点击时再取。
-
-```csharp
-// XAML: Border.PointerPressed="OnTabPointerPressed"
-private DocumentViewModel? _contextMenuTarget;
-
-private void OnTabPointerPressed(object? sender, PointerPressedEventArgs e)
-{
-    if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
-    if (sender is Control { DataContext: DocumentViewModel doc })
-        _contextMenuTarget = doc;
-}
-```
-
-菜单项的 `Click` 从 `_contextMenuTarget` 取值。实测通过：状态栏出现「已复制路径：…」。
-
-**注意**：`MenuItem.DataContext` 也不可靠（菜单内 DataContext 不一定继承到外层标签），不要依赖它。
-
----
-
-### B9. `async void` 事件处理器必须自带异常兜底
-
-**问题** 🔬 实测
-
-右键菜单 7 个处理器、文件树选择、拖放等都是 `async void`（事件签名要求）。
-任何一个内部异常都会逃逸到 `SynchronizationContext`，**直接终结进程**——用户看到的是"点了菜单程序就没了"。
-
-**易被忽略的原因**：这些方法调用的 VM 方法内部大多有 try/catch，看起来是安全的；
-但链路中间还夹着**弹窗、批量关闭、文件 IO**，任何一环抛异常都到顶了。
-
-**解法**：统一包一层。
-
-```csharp
-private async void RunMenuAction(Func<Task> action)
-{
-    try { await action(); }
-    catch (Exception ex) { _viewModel.StatusMessage = $"操作失败：{ex.Message}"; }
-}
-```
-
-**要点**：不要静默吞掉——把原因写到状态栏，用户至少知道发生了什么。
-
----
-
-### F10. 自动化验证失败时，先排除环境干扰
-
-**踩坑过程** 🔬 实测
-
-审计右键菜单时连续三次"失败"，每次都得出不同结论，全部是误判：
-
-| 现象 | 我的判断 | 真相 |
-| --- | --- | --- |
-| 菜单项灰显 | 绑定写错了 | ✅ 这个判断对了 |
-| 修复后仍不执行 | 绑定还是错 | 点击坐标落在**另一个程序的窗口**上 |
-| 键盘 Enter 也不执行 | 处理器没接上 | **剪贴板被其他程序占用**，`Get-Clipboard` 直接抛异常 |
-
-最后一次用**状态栏文本**而不是剪贴板验证，才得到确定结论。
-
-**教训**：
-
-1. **验证指标要选不受环境影响的**。剪贴板是全局共享资源，别的程序随时会占用；状态栏、日志文件才是本进程私有的。
-2. **窗口位置会漂移**。自动化点击前要 `SetWindowPos` + `SetForegroundWindow`，否则可能点到别处。
-3. 截图能证伪：`SuperPost` 窗口盖住了目标区域，一眼就能看出点击没打中。
-4. 与 F9 一起看：**F9 是工具静默失效，F10 是环境干扰**，两者都伪装成"功能没实现"。
-
----
-
-
 # 实践经验与踩坑记录
 
 > 这份文档记录本项目开发过程中**实际遇到**的问题：现象、根因、解法，以及「下次怎么更快发现」。
@@ -517,7 +324,6 @@ protected override async void OnClosing(WindowClosingEventArgs e)
 
 **推广**：`Padding` 的四分量是独立的，修完一个边不代表其他边没问题。改 `Padding` 时应当把四个边**逐一对照设计意图**确认。
 
-
 ---
 
 ### B7. MarkView 的滚动条浮在内容之上，会压住表格边框
@@ -567,6 +373,67 @@ padding=24 → 滚动条 1244-1245, 表格 1247   （重合 2px）
 **可复用的判断**：遇到"内容被浮层遮挡"（overlay 滚动条、悬浮按钮、粘性表头），**调容器的 padding 一定是无效的**——必须改内容层的尺寸或边距。判断方法：同时移动前后测量两者的相对距离，如果距离不变，就说明动错了层级。
 
 **顺带**：这条也说明"加 padding"和"加 margin"在 WPF/Avalonia 里对布局的影响不同——`Padding` 内缩子元素，`Margin` 只影响元素自身在父容器中的位置。这里需要的是后者。
+
+---
+
+### B8. `ContextMenu` 不在视觉树里，相对绑定与 PlacementTarget 都拿不到目标
+
+**现象** 🔬 实测
+
+给标签加了右键菜单，绑定写成 `Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SaveCommand}"`。
+结果：**菜单能弹出，但每一项都是灰的**，点击毫无反应。
+
+**根因（两层，都实测确认）**
+
+1. `ContextMenu` 是弹出层，**不属于视觉树**，`$parent[ItemsControl]` 解析不到祖先，绑定失败 → `Command` 为 null → 菜单项禁用。
+2. 改用 `ContextMenu.PlacementTarget`（被右键的控件）看起来合理，但日志显示 **`Opening` 事件里它已经是 `null`**：
+
+```
+opening: placement=null tag=null
+click:   menu=ok          tag=null
+```
+
+**解法**：在**右键按下时**就记住目标，菜单项点击时再取。
+
+```csharp
+// XAML: Border.PointerPressed="OnTabPointerPressed"
+private DocumentViewModel? _contextMenuTarget;
+
+private void OnTabPointerPressed(object? sender, PointerPressedEventArgs e)
+{
+    if (!e.GetCurrentPoint(this).Properties.IsRightButtonPressed) return;
+    if (sender is Control { DataContext: DocumentViewModel doc })
+        _contextMenuTarget = doc;
+}
+```
+
+菜单项的 `Click` 从 `_contextMenuTarget` 取值。实测通过：状态栏出现「已复制路径：…」。
+
+**注意**：`MenuItem.DataContext` 也不可靠（菜单内 DataContext 不一定继承到外层标签），不要依赖它。
+
+---
+
+### B9. `async void` 事件处理器必须自带异常兜底
+
+**问题** 🔬 实测
+
+右键菜单 7 个处理器、文件树选择、拖放等都是 `async void`（事件签名要求）。
+任何一个内部异常都会逃逸到 `SynchronizationContext`，**直接终结进程**——用户看到的是"点了菜单程序就没了"。
+
+**易被忽略的原因**：这些方法调用的 VM 方法内部大多有 try/catch，看起来是安全的；
+但链路中间还夹着**弹窗、批量关闭、文件 IO**，任何一环抛异常都到顶了。
+
+**解法**：统一包一层。
+
+```csharp
+private async void RunMenuAction(Func<Task> action)
+{
+    try { await action(); }
+    catch (Exception ex) { _viewModel.StatusMessage = $"操作失败：{ex.Message}"; }
+}
+```
+
+**要点**：不要静默吞掉——把原因写到状态栏，用户至少知道发生了什么。
 
 ---
 
@@ -1113,39 +980,6 @@ assert($current -eq 'Sentinel.TestHandler')
 
 ---
 
-## G. 被推翻的判断（诚实记录）
-
-写下来是为了提醒：**没验证过的结论不要写成定论**。
-
-| 初稿判断 | 实测结果 | 处理 |
-| --- | --- | --- |
-| 「**不要开 `PublishAot`**，Avalonia/Markdig/TextMate 的反射路径需要大量 `DynamicDependency`」 | AOT 编译成功，9/9 自检通过，裁剪 0 告警，exe 34.21MB | 已在报告 §7.1 更正为「可行」 |
-| 「AOT 产物应该只有 exe 一个文件」 | 是 exe + 4 个原生库（共 5 文件，52.72MB） | 已在报告与 README 更正 |
-| 「发布包约 45–55MB（trimming）」 | AOT 运行文件 52.72MB，zip 19.91MB，安装包 15.04MB | 已补充实测数据 |
-
-**方法论价值**：这三条都是"听起来合理但没有实测"的推断。报告里现在对未验证内容标注了性质，避免下次把推测当结论用。
-
----
-
-## H. 排查手法速查
-
-| 场景 | 手法 |
-| --- | --- |
-| 控件找不到了 | `control.GetVisualDescendants().GroupBy(x => x.GetType().Name)` 打印类型直方图 |
-| 事件没触发 | 在回调里先写一行日志到文件（WinExe 无控制台，`Console` 不可见） |
-| 布局不生效 | 检查是不是只改了 `IsVisible` 而没改 Grid 轨道；确认有"初始应用"入口 |
-| 底部/右侧多出固定宽度空白 | 某个 `Height=0` 的轨道仍带 `MinHeight>0`，Grid 会按最小尺寸撑开（B3） |
-| 行号/滚动条线提前断开 | 量「线起点 / 内容区起点 / 容器起点」（上下各测一次），差值是 padding 或 margin（B6） |
-| 内容被滚动条/浮层压住 | 调容器 padding 无效（会连滚动条一起移）；改内容层 margin（B7） |
-| 滚动不同步 | 分别打印两侧的 `Offset / Extent / Viewport`，先确认 ratio 不是恒 0 |
-| AOT 崩溃 | 先手工跑 `--selftest`；再确认 `Assembly.Location` 是否为空（是否真 AOT） |
-| 安装包启动崩 | 检查 `{app}` 下原生库是否齐全（缺 Skia 必崩） |
-| 注册表没生效 | `reg query HKCR\<ext>` 看合并视图；注意 `assoc` 只查 HKLM，查不到按用户安装的关联 |
-| 卸载验证不稳定 | 卸载器会把自身复制到 `_iu*.tmp` 再运行，`-Wait` 不等于卸载完成；要轮询该进程结束后再读注册表（E4） |
-| CI 失败但本地正常 | 先判断是产品坏了还是断言坏了（F4） |
-
----
-
 ### F9. 测试工具自身的缺陷会伪装成产品缺陷
 
 **现象** 🔬 实测
@@ -1191,6 +1025,202 @@ uint sent = SendInput(4, new[] {
 
 ---
 
+### F10. 自动化验证失败时，先排除环境干扰
+
+**踩坑过程** 🔬 实测
+
+审计右键菜单时连续三次"失败"，每次都得出不同结论，全部是误判：
+
+| 现象 | 我的判断 | 真相 |
+| --- | --- | --- |
+| 菜单项灰显 | 绑定写错了 | ✅ 这个判断对了 |
+| 修复后仍不执行 | 绑定还是错 | 点击坐标落在**另一个程序的窗口**上 |
+| 键盘 Enter 也不执行 | 处理器没接上 | **剪贴板被其他程序占用**，`Get-Clipboard` 直接抛异常 |
+
+最后一次用**状态栏文本**而不是剪贴板验证，才得到确定结论。
+
+**教训**：
+
+1. **验证指标要选不受环境影响的**。剪贴板是全局共享资源，别的程序随时会占用；状态栏、日志文件才是本进程私有的。
+2. **窗口位置会漂移**。自动化点击前要 `SetWindowPos` + `SetForegroundWindow`，否则可能点到别处。
+3. 截图能证伪：`SuperPost` 窗口盖住了目标区域，一眼就能看出点击没打中。
+4. 与 F9 一起看：**F9 是工具静默失效，F10 是环境干扰**，两者都伪装成"功能没实现"。
+
+---
+
+### F11. 用固定 `Task.Delay` 等异步事件，测试必然偶发失败
+
+**现象** 🔬 实测
+
+`FileChangeWatcherTests` 用 `await Task.Delay(150)` 等 `FileSystemWatcher` 就绪、
+`await Task.Delay(1500)` 等防抖窗口过去。表现是**偶发失败**：105 个用例里偶见 1 个失败，重跑即过。
+
+**根因**
+
+文件系统事件是异步的，到达时间取决于系统负载。固定 sleep 只是"多数时候够用"，
+负载高时事件还在路上，断言就提前执行了。
+
+**更糟的后果**：这类偶发失败会训练人养成"重跑一次就好"的习惯，
+从而掩盖真正的间歇性缺陷。审计时看到过一次失败又无法复现，**必须查清而不是跳过**。
+
+**解法**：轮询到条件成立，而不是睡固定时长。
+
+```csharp
+private static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+{
+    var deadline = DateTime.UtcNow + timeout;
+    while (DateTime.UtcNow < deadline)
+    {
+        if (condition()) return true;
+        await Task.Delay(25, TestContext.Current.CancellationToken);
+    }
+    return condition();
+}
+}
+```
+
+慢机器上只是慢一点，不会误判失败。修复后连跑 **10 次全通过**（此前 8 次里有 1–2 次失败）。
+
+**同一类问题**：`Thread.Sleep`、`WaitForExit(固定时间)`、UI 自动化里的"点完等 1 秒"——都是同一个模式。
+
+---
+
+### F12. 「没有任何反应」的断言必须配一个正向对照
+
+**背景** 🔬 实测
+
+`SuppressOwnWrite_DoesNotRaise` 原本只断言"抑制期间事件数为 0"。
+这条断言在 **watcher 完全没工作** 时也会通过——测试是绿的，功能是坏的。
+
+**解法**：加正向对照。先确认 watcher 能检测到探测写入，再断言抑制期间为 0，
+最后确认宽限期后能恢复检测。
+
+```csharp
+await EnsureWatchingAsync(watcher, path, () => Volatile.Read(ref raised));  // 先证明能用
+var baseline = Volatile.Read(ref raised);
+using (watcher.SuppressOwnWrite()) { /* 写入 */ }
+Assert.Equal(0, Volatile.Read(ref raised) - baseline);                     // 抑制有效
+await Task.Delay(700);                                                      // 等宽限期结束
+await File.WriteAllTextAsync(path, "external");
+Assert.True(await WaitUntilAsync(() => Volatile.Read(ref raised) > before)); // 能恢复
+```
+
+**加上正向对照后，这个测试立刻暴露了一个真实产品缺陷**（见 F13）。
+
+**推广**：凡是断言"不发生 X"的测试，都要先证明"在正常条件下 X 会发生"。
+否则它只能证明"代码没抛异常"，不能证明行为正确。
+
+---
+
+### F13. 用「布尔开关 + 延迟解除」抑制事件，会吞掉宽限期内的真实事件
+
+**现象** 🔬 实测（由 F12 的正向对照发现）
+
+自身保存时需要抑制文件监听，避免误报"文件被外部修改"。原实现是：
+
+```csharp
+// 抑制开始 → 置 true
+_owner._ownWriteInProgress = true;
+
+// Dispose 时延迟 500ms 再置 false
+_ = Task.Delay(500).ContinueWith(_ => _owner._ownWriteInProgress = false, ...);
+```
+
+**缺陷**：这 500ms 内发生的一切文件事件都被当作"自身写入"丢弃。
+真实场景——**保存后立刻被外部工具（如 git、格式化器）修改**——那次修改会被静默忽略，
+用户以为文件是最新的，实际不是。
+
+**解法**：改用时间戳窗口。
+
+```csharp
+private long _ownWriteTicks;   // 最近一次自身写入的时刻
+private static readonly TimeSpan OwnWriteGrace = TimeSpan.FromMilliseconds(500);
+
+private bool InOwnWriteGrace
+{
+    get
+    {
+        var ticks = Interlocked.Read(ref _ownWriteTicks);
+        return ticks != 0 && DateTime.UtcNow.Ticks - ticks < OwnWriteGrace.Ticks;
+    }
+}
+```
+
+写入时刷新时间戳，事件到达时比较**距上次写入多久**。
+仍然是 500ms 的宽限，但语义从"这段时间内一律忽略"变成"忽略紧跟着自身写入的事件"——
+宽限期结束后到达的事件照常上报。
+
+**要点**：抑制"自己的操作"时，优先用**时间窗口**而不是**全局开关**。
+开关的问题在于它的作用域是"时间上的一个区间"，而真实事件并不遵守你划的边界。
+
+---
+
+### F14. 脚本改文档改完后，必须比对"非空行多重集"
+
+**现象** 🔬 实测
+
+`pitfalls-and-practices.md` 的一级标题跑到了第 194 行，B8/B9/F10 悬在文件最开头，F9 被夹在 H 与 I 之间。连续两个版本都没人发现——因为**文档结构损坏不影响编译、不影响测试，读正文也看不出**。
+
+**根因**：用脚本按**行号**插入内容，而行号是在另一份副本上算出来的。文件稍有一点长度差异，插入点就落到别处。
+
+```powershell
+# ✗ 行号在别的副本上算的，插进去就错位
+$lines.InsertRange($lineNumberFromAnotherCopy, $newContent)
+```
+
+**解法**：按标题定位边界，而不是按行号。
+
+```powershell
+$iC = FindHeading $L '^## C\.'     # 用正则找章节标题
+$at = $iC; while ($L[$at-1] -match '^\s*$') { $at-- }   # 回退到分隔线
+```
+
+**关键的一步是改完的校验**——比对非空行的**多重集**：
+
+```powershell
+$before = $original | Where-Object { $_ -notmatch '^\s*$' } | Sort-Object
+$after  = $updated  | Where-Object { $_ -notmatch '^\s*$' } | Sort-Object
+if (Compare-Object $before $after) { throw "内容变了，放弃写入" }
+```
+
+它同时能抓住两类破坏：**丢了内容**（少行）和**重复了内容**（多行）。实测中它确实拦住了一次——重排脚本多删了一个 `---`（那是上一节的结束分隔线），多重集立刻报出 786 对 785。
+
+**推广**：凡是用脚本批量改结构化文本（Markdown、配置、SQL 迁移），都用「改完比对内容集合」兜底。它比"再看一眼"可靠，也比写完整解析器便宜。
+
+---
+
+## G. 被推翻的判断（诚实记录）
+
+写下来是为了提醒：**没验证过的结论不要写成定论**。
+
+| 初稿判断 | 实测结果 | 处理 |
+| --- | --- | --- |
+| 「**不要开 `PublishAot`**，Avalonia/Markdig/TextMate 的反射路径需要大量 `DynamicDependency`」 | AOT 编译成功，9/9 自检通过，裁剪 0 告警，exe 34.21MB | 已在报告 §7.1 更正为「可行」 |
+| 「AOT 产物应该只有 exe 一个文件」 | 是 exe + 4 个原生库（共 5 文件，52.72MB） | 已在报告与 README 更正 |
+| 「发布包约 45–55MB（trimming）」 | AOT 运行文件 52.72MB，zip 19.91MB，安装包 15.04MB | 已补充实测数据 |
+
+**方法论价值**：这三条都是"听起来合理但没有实测"的推断。报告里现在对未验证内容标注了性质，避免下次把推测当结论用。
+
+---
+
+## H. 排查手法速查
+
+| 场景 | 手法 |
+| --- | --- |
+| 控件找不到了 | `control.GetVisualDescendants().GroupBy(x => x.GetType().Name)` 打印类型直方图 |
+| 事件没触发 | 在回调里先写一行日志到文件（WinExe 无控制台，`Console` 不可见） |
+| 布局不生效 | 检查是不是只改了 `IsVisible` 而没改 Grid 轨道；确认有"初始应用"入口 |
+| 底部/右侧多出固定宽度空白 | 某个 `Height=0` 的轨道仍带 `MinHeight>0`，Grid 会按最小尺寸撑开（B3） |
+| 行号/滚动条线提前断开 | 量「线起点 / 内容区起点 / 容器起点」（上下各测一次），差值是 padding 或 margin（B6） |
+| 内容被滚动条/浮层压住 | 调容器 padding 无效（会连滚动条一起移）；改内容层 margin（B7） |
+| 滚动不同步 | 分别打印两侧的 `Offset / Extent / Viewport`，先确认 ratio 不是恒 0 |
+| AOT 崩溃 | 先手工跑 `--selftest`；再确认 `Assembly.Location` 是否为空（是否真 AOT） |
+| 安装包启动崩 | 检查 `{app}` 下原生库是否齐全（缺 Skia 必崩） |
+| 注册表没生效 | `reg query HKCR\<ext>` 看合并视图；注意 `assoc` 只查 HKLM，查不到按用户安装的关联 |
+| 卸载验证不稳定 | 卸载器会把自身复制到 `_iu*.tmp` 再运行，`-Wait` 不等于卸载完成；要轮询该进程结束后再读注册表（E4） |
+| CI 失败但本地正常 | 先判断是产品坏了还是断言坏了（F4） |
+
+---
 
 ## I. 参考
 

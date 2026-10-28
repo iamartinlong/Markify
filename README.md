@@ -123,7 +123,7 @@ CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提�
 
 选型依据、与备选方案（Markdown.Avalonia、官方 Pro 控件、WebView）的对比，见 [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md)。
 
-开发中实际踩的坑与排查手法（滚动同步、AOT、安装包、文件关联等 30+ 条），见 [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md)。
+开发中实际踩的坑与排查手法（滚动同步、AOT、安装包、文件关联、测试时序等 40 条），见 [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md)。
 
 ## 文档
 
@@ -131,7 +131,7 @@ CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提�
 | --- | --- |
 | [docs/todo.md](docs/todo.md) | **待办与下一步计划**（接手先看这个） |
 | [docs/worklog.md](docs/worklog.md) | 已完成工作、决策记录与被推翻的判断 |
-| [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md) | 30+ 条踩坑与排查手法 |
+| [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md) | 40 条踩坑与排查手法 |
 | [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md) | 选型依据与架构 |
 | [docs/logo.md](docs/logo.md) | 图标设计与替换步骤 |
 
