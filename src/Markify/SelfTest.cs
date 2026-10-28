@@ -213,6 +213,39 @@ public static class SelfTest
             }
         });
 
+        // HTML 导出覆盖：[GeneratedRegex] 的源生成、Markdig 渲染管线、以及 details 的
+        // 抽取还原逻辑都可能在裁剪/AOT 下失效，而单测是在 JIT 下跑的，抓不到这类问题。
+        Check("html-export", () =>
+        {
+            const string markdown = """
+                # Title
+
+                | A | B |
+                |---|---|
+                | 1 | 2 |
+
+                <details>
+                <summary>More</summary>
+
+                Inner **bold**
+
+                </details>
+                """;
+
+            var html = Services.MarkdownHtmlExporter.Render(markdown, null, "selftest", darkFirst: false);
+
+            if (!html.StartsWith("<!DOCTYPE html>", StringComparison.Ordinal))
+                throw new InvalidOperationException("missing doctype");
+            if (!html.Contains("<table>", StringComparison.Ordinal))
+                throw new InvalidOperationException("table not rendered");
+            if (!html.Contains("<details>", StringComparison.Ordinal))
+                throw new InvalidOperationException("details block dropped");
+            if (html.Contains("MARKIFY_DETAILS_PLACEHOLDER", StringComparison.Ordinal))
+                throw new InvalidOperationException("internal placeholder leaked");
+
+            return $"bytes={html.Length}";
+        });
+
         var passed = results.Count(r => r.Ok);
         var failed = results.Count - passed;
         Write(_outputPath, $"complete: all checks done, passed={passed} failed={failed}\n");

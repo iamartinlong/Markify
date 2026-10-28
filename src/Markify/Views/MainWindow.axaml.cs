@@ -51,6 +51,10 @@ public partial class MainWindow : Window, IDocumentDialogService
 
         Editor.AddHandler(KeyDownEvent, OnEditorKeyDown, RoutingStrategies.Tunnel);
 
+        // Ctrl+H 兜底：AvaloniaEdit 的 TextArea 会在隧道阶段消费该组合键，
+        // 编辑器级的处理器（上面那个）收不到（用日志实测确认过）。
+        // 在窗口级的隧道阶段截获，优先级更高。
+        AddHandler(KeyDownEvent, OnWindowPreviewKeyDown, RoutingStrategies.Tunnel);
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
@@ -95,6 +99,7 @@ public partial class MainWindow : Window, IDocumentDialogService
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _viewModel.ActiveDocumentChanged -= OnActiveDocumentChanged;
             _viewModel.FindRequested -= OnFindRequested;
+            _viewModel.ReplaceRequested -= OnReplaceRequested;
             _viewModel.ExternalChangePromptRequested -= OnExternalChangePromptRequested;
             _viewModel.DiscardPromptRequested -= OnDiscardPromptRequested;
         }
@@ -107,6 +112,7 @@ public partial class MainWindow : Window, IDocumentDialogService
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.ActiveDocumentChanged += OnActiveDocumentChanged;
         _viewModel.FindRequested += OnFindRequested;
+        _viewModel.ReplaceRequested += OnReplaceRequested;
         _viewModel.ExternalChangePromptRequested += OnExternalChangePromptRequested;
         _viewModel.DiscardPromptRequested += OnDiscardPromptRequested;
 
@@ -191,6 +197,12 @@ public partial class MainWindow : Window, IDocumentDialogService
     {
         Editor.TextArea.Focus();
         ShowSearchPanel();
+    }
+
+    private void OnReplaceRequested(object? sender, EventArgs e)
+    {
+        Editor.TextArea.Focus();
+        ShowSearchPanel(replaceMode: true);
     }
 
     /// <summary>外部修改确认对话框。返回 true 表示用户选择重新加载。</summary>
@@ -384,6 +396,32 @@ public partial class MainWindow : Window, IDocumentDialogService
         _attachedDocument?.OnCaretChanged(caret.Line, caret.Column, Editor.SelectionLength);
     }
 
+    /// <summary>
+    /// 窗口级隧道处理器，专门截获 AvaloniaEdit 会自行消费的组合键。
+    ///
+    /// 为什么需要它在窗口上而不是编辑器上：AvaloniaEdit 的 TextArea 在
+    /// 隧道阶段就处理了 Ctrl+H（历史上用于"替换"），编辑器级的处理器收不到。
+    /// 窗口作为隧道起点会更早拿到事件（已用日志确认编辑器级处理器未被调用）。
+    /// </summary>
+    /// <summary>
+    /// 窗口级隧道处理器，专门截获 AvaloniaEdit 会自行消费的组合键。
+    ///
+    /// 为什么放在窗口而不是编辑器上：AvaloniaEdit 的 TextArea 在隧道阶段就处理了 Ctrl+H，
+    /// 编辑器级的处理器收不到（已用日志确认）。
+    /// </summary>
+    private void OnWindowPreviewKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyModifiers != KeyModifiers.Control)
+            return;
+
+        // 只处理编辑器内的替换；焦点在菜单或对话框时不抢键。
+        if (e.Key == Key.H && Editor.IsKeyboardFocusWithin)
+        {
+            ShowSearchPanel(replaceMode: true);
+            e.Handled = true;
+        }
+    }
+
     private void OnEditorKeyDown(object? sender, KeyEventArgs e)
     {
         // Ctrl+F：打开编辑器内置的查找面板。
@@ -392,14 +430,6 @@ public partial class MainWindow : Window, IDocumentDialogService
         if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.F)
         {
             ShowSearchPanel(replaceMode: false);
-            e.Handled = true;
-            return;
-        }
-
-        // Ctrl+H：查找并替换
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.H)
-        {
-            ShowSearchPanel(replaceMode: true);
             e.Handled = true;
             return;
         }

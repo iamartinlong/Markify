@@ -953,6 +953,52 @@ assert($current -eq 'Sentinel.TestHandler')
 
 ---
 
+### F9. 测试工具自身的缺陷会伪装成产品缺陷
+
+**现象** 🔬 实测
+
+审计时发现 `Ctrl+H`「没反应」。按之前的经验（`Ctrl+F` 曾因命令路由失效）加了窗口级隧道处理器，仍然没反应。日志显示 `ShowSearchPanel` 完全没被调用。
+
+于是做对照实验：**此时 `Ctrl+F` 也不工作了**——但它几天前验证过是好的。
+
+**根因**
+
+问题在模拟按键的方式，不在应用代码：
+
+| 发送方式 | 结果 |
+| --- | --- |
+| `keybd_event` 发 Ctrl | Avalonia 收不到 `KeyModifiers`，事件不触发 |
+| `SendInput` 发 Ctrl | 正常，日志立刻出现 `key=H mods=Control` |
+
+`keybd_event` 是旧 API，对修饰键状态的处理在新版应用里不可靠。而单独发送字母键（无修饰键）却能成功——这正是误导之处：**能输入文字让人误判「键盘模拟是好的」**。
+
+**解法**：UI 自动化一律用 `SendInput`。
+
+```csharp
+[StructLayout(LayoutKind.Sequential)]
+struct INPUT { public uint type; public KEYBDINPUT ki; public int pad1, pad2; }
+
+uint sent = SendInput(4, new[] {
+    Key(0x11, false),  // Ctrl down
+    Key(vk,   false),  // key down
+    Key(vk,   true),   // key up
+    Key(0x11, true)    // Ctrl up
+}, Marshal.SizeOf(typeof(INPUT)));
+// 返回 4 表示四个事件全部投递成功
+```
+
+**方法论教训**：
+
+1. **对照组**比单次观察可靠。发现 `Ctrl+H` 失败时，顺手测一下「已知是好的」`Ctrl+F`，立刻能区分「改坏了」还是「测试方法失效」。
+2. **「部分成功」最容易误导**。字母能输入就以为键盘模拟没问题，实际上修饰键是单独一条路径。
+3. **加日志 > 猜代码**。先怀疑命令路由、又怀疑 IME（确实查了 `ImmGetOpenStatus` 并排除），最后靠一行日志定位。
+4. 审计过程中我**为不存在的缺陷改过代码**（加了窗口级 handler）。修复本身无害，但要意识到：**没有失败证据就动手改，是在引入风险**。
+
+**推广**：任何「自动化测试通过/失败」的结论，先确认工具本身可信。UI 自动化尤其如此——它静默失败时，看起来和「功能没实现」一模一样。
+
+---
+
+
 ## I. 参考
 
 - 完整选型与架构：[avalonia-markdown-client.md](avalonia-markdown-client.md)

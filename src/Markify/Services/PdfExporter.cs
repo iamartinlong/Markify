@@ -101,11 +101,11 @@ public static class PdfExporter
                 File.Delete(targetPdfPath);
 
             // --headless=new 是当前推荐的写法；旧版 --headless 在新版本里仍可用但不保证长期有效。
-            // 同时带两个用户数据目录隔离参数，避免与用户正在运行的浏览器实例冲突（会直接失败）。
+            // 注意不要加 --no-sandbox：以普通用户权限运行时它没有收益，
+            // 却会关闭渲染进程的沙箱，属于白白削弱安全性。
             var args = string.Join(' ',
                 "--headless=new",
                 "--disable-gpu",
-                "--no-sandbox",
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--disable-extensions",
@@ -136,6 +136,7 @@ public static class PdfExporter
             using var cts = new CancellationTokenSource(limit);
 
             // 必须持续读走输出，否则子进程可能因管道写满而卡死（进程被隐藏时尤其隐蔽）。
+            // 两个流都要处理：只读 stderr 而不管 stdout，一旦 stdout 写满同样会挂住。
             var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
             var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
 
@@ -149,6 +150,8 @@ public static class PdfExporter
                 return PdfExportResult.Fail($"PDF 生成超时（{limit.TotalSeconds:0} 秒）。");
             }
 
+            // 进程已退出，确保两个读取任务都完成（避免留下未观察的异常/未释放的流）。
+            await SafeReadAsync(stdoutTask);
             // 写文件有轻微延迟，给一小段时间并轮询，避免"进程已退出但文件还没落盘"。
             var produced = await WaitForFileAsync(targetPdfPath, TimeSpan.FromSeconds(5));
 

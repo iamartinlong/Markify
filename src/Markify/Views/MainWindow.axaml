@@ -33,6 +33,9 @@
         <KeyBinding Gesture="Ctrl+Shift+E" Command="{Binding ExportHtmlCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+D" Command="{Binding ExportPdfCommand}" />
         <KeyBinding Gesture="Ctrl+F" Command="{Binding FindCommand}" />
+        <!-- Ctrl+H 不在这里绑定：AvaloniaEdit 的 TextArea 会先消费该组合键，
+             窗口级 KeyBinding 反而会把它标记为已处理，导致编辑器内部的 Tunnel 处理器收不到。
+             实际处理见 MainWindow.OnEditorKeyDown。 -->
         <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseTabCommand}" />
         <KeyBinding Gesture="Ctrl+Tab" Command="{Binding NextTabCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+Tab" Command="{Binding PreviousTabCommand}" />
@@ -49,13 +52,15 @@
                 <MenuItem Header="另存为…" Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S" />
                 <Separator />
                 <MenuItem Header="导出为 HTML…" Command="{Binding ExportHtmlCommand}" InputGesture="Ctrl+Shift+E" />
-                <MenuItem Header="导出为 PDF…" Command="{Binding ExportPdfCommand}" InputGesture="Ctrl+Shift+D" />
+                <MenuItem Header="导出为 PDF…" Command="{Binding ExportPdfCommand}" InputGesture="Ctrl+Shift+D"
+                          IsEnabled="{Binding CanExportPdf}"
+                          ToolTip.Tip="PDF 导出依赖系统 Edge 或 Chrome" />
                 <Separator />
                 <MenuItem Header="退出" Click="OnExitClick" />
             </MenuItem>
             <MenuItem Header="编辑(_E)">
                 <MenuItem Header="查找…" Command="{Binding FindCommand}" InputGesture="Ctrl+F" />
-                <MenuItem Header="查找并替换…" Click="OnReplaceClick" InputGesture="Ctrl+H" />
+                <MenuItem Header="查找并替换…" Command="{Binding ReplaceCommand}" InputGesture="Ctrl+H" />
             </MenuItem>
             <MenuItem Header="视图(_V)">
                 <MenuItem Header="显示预览" ToggleType="CheckBox" IsChecked="{Binding IsPreviewVisible}" />

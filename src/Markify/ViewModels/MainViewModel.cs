@@ -78,6 +78,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = "就绪";
 
+    /// <summary>请求打开编辑器的查找并替换面板。</summary>
+    public event EventHandler? ReplaceRequested;
+
+    [RelayCommand]
+    private void Replace() => ReplaceRequested?.Invoke(this, EventArgs.Empty);
+
     [ObservableProperty]
     public partial bool IsOutlineVisible { get; set; }
 
@@ -178,20 +184,23 @@ public partial class MainViewModel : ObservableObject
     /// <summary>打开文件：若已打开则切到该标签，否则新建标签。</summary>
     public async Task OpenPathAsync(string path)
     {
-        var full = Path.GetFullPath(path);
-
-        var existing = Documents.FirstOrDefault(d =>
-            d.FilePath is not null && string.Equals(Path.GetFullPath(d.FilePath), full, StringComparison.OrdinalIgnoreCase));
-
-        if (existing is not null)
-        {
-            ActiveDocument = existing;
-            StatusMessage = $"已切换到 {existing.DocumentName}";
-            return;
-        }
-
+        // 路径规范化必须在 try 内：非法路径（含非法字符、空字节等）会让
+        // Path.GetFullPath 抛异常。此方法可能从 async void 的拖放处理器调用，
+        // 异常逃逸会直接终结进程（审计发现）。
         try
         {
+            var full = Path.GetFullPath(path);
+
+            var existing = Documents.FirstOrDefault(d =>
+                d.FilePath is not null && string.Equals(Path.GetFullPath(d.FilePath), full, StringComparison.OrdinalIgnoreCase));
+
+            if (existing is not null)
+            {
+                ActiveDocument = existing;
+                StatusMessage = $"已切换到 {existing.DocumentName}";
+                return;
+            }
+
             StatusMessage = $"正在打开 {Path.GetFileName(path)}…";
             var (text, encoding) = await _files.ReadAsync(full);
             var doc = CreateDocument(text, full, encoding);
@@ -361,10 +370,11 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>当前环境是否具备 PDF 导出条件（供菜单禁用提示用）。</summary>
-    public bool CanExportPdf => PdfExporter.FindBrowser() is not null;
-
     /// <summary>
+    /// 当前环境是否具备 PDF 导出条件。
+    /// 在构造时计算一次：FindBrowser 需要探测多个固定路径，不应在每次绑定求值时重复扫描。
+    /// </summary>
+    public bool CanExportPdf { get; } = PdfExporter.FindBrowser() is not null;    /// <summary>
     /// 导出当前文档为独立 HTML 文件。
     /// 与预览使用同一套 Markdig 管线，并把本地图片内嵌为 data URI，因此导出的文件可单独分发。
     /// </summary>

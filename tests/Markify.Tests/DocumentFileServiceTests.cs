@@ -140,4 +140,28 @@ public class DocumentFileServiceTests : IDisposable
 
         Assert.Equal(content, text);
     }
+
+    [Fact]
+    public async Task Write_WhenTargetIsLocked_LeavesNoTempFileBehind()
+    {
+        // 审计发现：写入失败时原本会残留 .markify-tmp 在用户文档目录里。
+        // 这里用"目标文件被独占打开"制造写入失败，验证临时文件被清理。
+        var path = PathFor("locked.md");
+        await File.WriteAllTextAsync(path, "original", TestContext.Current.CancellationToken);
+
+        var tempPath = path + ".markify-tmp";
+
+        // 独占持有目标文件，让 File.Replace 失败
+        using (var hold = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await Assert.ThrowsAnyAsync<IOException>(() =>
+                _service.WriteAsync(path, "updated", new UTF8Encoding(false),
+                                    TestContext.Current.CancellationToken));
+        }
+
+        Assert.False(File.Exists(tempPath), "写入失败后不应残留临时文件");
+        // 原文件内容必须保持不变（原子写入的意义）
+        var (text, _) = await _service.ReadAsync(path, TestContext.Current.CancellationToken);
+        Assert.Equal("original", text);
+    }
 }

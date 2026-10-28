@@ -37,15 +37,39 @@ public sealed class DocumentFileService
             Directory.CreateDirectory(directory);
 
         var temp = path + ".markify-tmp";
-        await using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
-        await using (var writer = new StreamWriter(stream, encoding))
-        {
-            await writer.WriteAsync(text.AsMemory(), ct).ConfigureAwait(false);
-        }
 
-        if (File.Exists(path))
-            File.Replace(temp, path, null);
-        else
-            File.Move(temp, path);
+        try
+        {
+            await using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+            await using (var writer = new StreamWriter(stream, encoding))
+            {
+                await writer.WriteAsync(text.AsMemory(), ct).ConfigureAwait(false);
+            }
+
+            if (File.Exists(path))
+                File.Replace(temp, path, null);
+            else
+                File.Move(temp, path);
+        }
+        catch
+        {
+            // 写入或替换失败时必须清理临时文件，否则会在用户文档目录里留下孤儿文件
+            // （审计发现：原本没有这个清理）。
+            TryDelete(temp);
+            throw;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+            // 清理失败不应遮盖原始异常
+        }
     }
 }
