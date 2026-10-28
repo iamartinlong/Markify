@@ -437,6 +437,104 @@ private async void RunMenuAction(Func<Task> action)
 
 ---
 
+### B10. 不设 `Window.Background` 时，菜单栏在深色主题下会渲染成纯黑
+
+**现象** 🔬 实测
+
+深色主题下截图取色，得到三段互不相关的颜色：
+
+| 区域 | 实测 |
+| --- | --- |
+| 标题栏（非客户区） | `#FFFFFF` |
+| 菜单栏 | `#000000` ← 纯黑 |
+| 工具栏 / 标签栏 / 状态栏 | `#252526` |
+
+菜单栏像被"挖掉"了一样，与周围的 `#252526` 明显割裂。浅色主题下完全看不出问题。
+
+**根因**
+
+`MainWindow.axaml` 从未设置 `Window.Background`。`Menu` 自己不带背景，于是露出**下层的窗口底色**；而窗口底色未设置时取主题默认值——浅色恰好是白，跟菜单栏想要的浅色一样，所以问题不暴露。
+
+**解法**：给 Window 设背景，并把 Menu 设为透明，颜色交给外层 `Border`。
+
+```xml
+<Window ... Background="{DynamicResource SurfaceChrome}">
+  <Border Classes="chrome">
+    <Menu Background="Transparent"> ... </Menu>
+  </Border>
+</Window>
+```
+
+**排查手法**：深色主题出现"某个横条颜色不对"，先逐区域取色。若某条纯黑或纯白，多半是**没人给它背景**，而不是样式写错。
+
+---
+
+### B11. 设计令牌缺键时 Avalonia 不报错，只是悄悄回退
+
+**现象** 🔬 实测
+
+给明暗两套主题字典补令牌时，漏掉 Dark 里的一个键。结果是：
+
+- 编译通过，0 警告
+- 单元测试全过
+- 运行不崩溃
+- 只是那个属性用了默认值 —— 深色主题下某个面板"还是浅色的"
+
+**根因**：`{DynamicResource Key}` 找不到键时返回 `UnsetValue`，控件回退到模板默认值，整个过程没有异常也没有日志。
+
+**解法**：在自检里加一项，把两套主题 × 全部令牌都查一遍。
+
+```csharp
+foreach (var key in required)
+    foreach (var variant in new[] { ThemeVariant.Light, ThemeVariant.Dark })
+        if (!app.TryGetResource(key, variant, out _))
+            missing.Add($"{variant.Key}:{key}");
+```
+
+这条检查**必须做负向验证**才有意义：故意删掉 `Dark:StateSelected` 再跑，确认它报 `missing tokens: Dark:StateSelected` 且退出码为 1。第一次写完不验证，很可能写出一条永远通过的假检查（同类教训见 F12）。
+
+---
+
+### B12. 改 XAML 后 `dotnet build` 可能不重编资源，跑的是旧 XAML
+
+**现象** 🔬 实测
+
+做 B11 的负向验证：临时删掉一个令牌 → 自检正确报错 → 恢复文件 → 再次构建并运行，**仍然报同样的错**。
+
+`App.axaml` 里那个键明明已经回来了（`Select-String` 确认存在）。
+
+**根因**：XAML 被编译成 `AvaloniaResource` 嵌进程序集，增量构建认为输入没变（时间戳精度 / 中间文件缓存），没重新打包资源。
+
+**解法**：改完 XAML 后做验证性运行，用 `-t:Rebuild`，不要用普通 build。
+
+```powershell
+dotnet build src/Markify -c Release -t:Rebuild
+```
+
+**要点**：`dotnet build` 成功不等于**你刚才改的 XAML 被编进去了**。凡是要"以运行结果为准"的验证（自检、截图取色），先 Rebuild。
+
+---
+
+### B13. 改 UI 后截图验证：鼠标停在哪，截图里就有它
+
+**现象** 🔬 实测
+
+改完深色主题，逐列扫描截图，发现 x=641 有一条 351px 长的 `#858585` 亮线，怀疑是 `GridSplitter` 的抓握指示太亮。给 `GridSplitter` 设了背景色，重新截图，**亮线还在**。
+
+再查：`#858585` 的像素其实散布在 x=641..1287、y=145..597 的整个区域共 1226 个 —— 那是编辑器里的**语法高亮文字**（TextMate DarkPlus 的注释色），不是线。
+
+**根因**：按"列"扫描时，一条列上连续的相同颜色会被误认为一条竖线，实际可能只是该列恰好穿过若干同色文字。
+
+**解法**：判断"某个区域是什么颜色"用**区域众数**，不要用单列/单行扫描。
+
+```js
+function mode(im, x0, x1, y0, y1) { /* 统计矩形内出现最多的颜色 */ }
+```
+
+**另一半教训**：截图时鼠标的位置会被截进去。要验证"静态外观"先把鼠标移开；要验证"悬停态"则有意停上去。两者不能用同一张图。
+
+---
+
 ## C. 编辑器与预览的滚动同步
 
 这是本项目**最费时**的一块，连踩三个坑。三个坑彼此独立，任何一个没解决都会让同步完全失效。

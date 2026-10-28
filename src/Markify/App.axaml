@@ -3,22 +3,66 @@
              x:Class="Markify.App"
              RequestedThemeVariant="Default">
 
+    <!--
+      设计令牌层。命名按"语义"而非"颜色"：Text.Secondary 而不是 Gray600，
+      这样换主题只需换另一套值，视图不用动。
+
+      取值来源：底色骨架抄 VS Code 2026 主题（整体一片 + 细线分区 + 半透明状态叠加），
+      强调色保留 Markify 自有。详见 docs/vscode-style-discussion.md §7。
+
+      关键手法（与"每个面板拉不同底色"相反）：
+        - Surface 与 Surface.Chrome 只差 1.04–1.07:1，几乎看不出色差
+        - 分区靠 Border 的 1px 细线（约 1.23–1.31:1）
+        - 悬停/选中用半透明叠加，一个值适配所有底色
+    -->
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="EditorBackground" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="EditorForeground" Color="#1F2328" />
-                    <SolidColorBrush x:Key="ChromeBackground" Color="#F6F8FA" />
-                    <SolidColorBrush x:Key="ChromeBorder" Color="#D8DEE4" />
-                    <SolidColorBrush x:Key="PreviewBackground" Color="#FFFFFF" />
+                    <!-- 面 -->
+                    <SolidColorBrush x:Key="Surface" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="SurfaceChrome" Color="#FAFAFD" />
+                    <SolidColorBrush x:Key="SurfaceSunken" Color="#F2F4F8" />
+
+                    <!-- 线 -->
+                    <SolidColorBrush x:Key="Border" Color="#E2E2E5" />
+                    <SolidColorBrush x:Key="BorderStrong" Color="#D4D4D4" />
+
+                    <!-- 文字 -->
+                    <SolidColorBrush x:Key="TextPrimary" Color="#202020" />
+                    <SolidColorBrush x:Key="TextSecondary" Color="#606060" />
+                    <SolidColorBrush x:Key="TextDisabled" Color="#8A8A8A" />
+
+                    <!-- 强调 / 语义 -->
+                    <SolidColorBrush x:Key="Accent" Color="#2166D8" />
+                    <SolidColorBrush x:Key="AccentForeground" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="Danger" Color="#C1352B" />
+
+                    <!-- 状态叠加（半透明，随底色自动适配） -->
+                    <SolidColorBrush x:Key="StateHover" Color="#00000014" />
+                    <SolidColorBrush x:Key="StatePressed" Color="#00000024" />
+                    <SolidColorBrush x:Key="StateSelected" Color="#2166D834" />
                 </ResourceDictionary>
+
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="EditorBackground" Color="#1E1E1E" />
-                    <SolidColorBrush x:Key="EditorForeground" Color="#D4D4D4" />
-                    <SolidColorBrush x:Key="ChromeBackground" Color="#252526" />
-                    <SolidColorBrush x:Key="ChromeBorder" Color="#3C3C3C" />
-                    <SolidColorBrush x:Key="PreviewBackground" Color="#0D1117" />
+                    <SolidColorBrush x:Key="Surface" Color="#121314" />
+                    <SolidColorBrush x:Key="SurfaceChrome" Color="#191A1B" />
+                    <SolidColorBrush x:Key="SurfaceSunken" Color="#0E0F10" />
+
+                    <SolidColorBrush x:Key="Border" Color="#2A2B2C" />
+                    <SolidColorBrush x:Key="BorderStrong" Color="#454545" />
+
+                    <SolidColorBrush x:Key="TextPrimary" Color="#BFBFBF" />
+                    <SolidColorBrush x:Key="TextSecondary" Color="#8C8C8C" />
+                    <SolidColorBrush x:Key="TextDisabled" Color="#6E7072" />
+
+                    <SolidColorBrush x:Key="Accent" Color="#4A85F3" />
+                    <SolidColorBrush x:Key="AccentForeground" Color="#0B1017" />
+                    <SolidColorBrush x:Key="Danger" Color="#F08A80" />
+
+                    <SolidColorBrush x:Key="StateHover" Color="#FFFFFF14" />
+                    <SolidColorBrush x:Key="StatePressed" Color="#FFFFFF24" />
+                    <SolidColorBrush x:Key="StateSelected" Color="#4A85F31C" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
@@ -33,13 +77,21 @@
         <!-- 可选预设：GitHub 外观 -->
         <StyleInclude Source="avares://MarkView.Avalonia/Themes/GitHubTheme.axaml" />
 
+        <!-- ================= 基础布局 ================= -->
+
         <Style Selector="Border.chrome">
-            <Setter Property="Background" Value="{DynamicResource ChromeBackground}" />
+            <Setter Property="Background" Value="{DynamicResource SurfaceChrome}" />
         </Style>
         <Style Selector="Border.statusbar">
             <Setter Property="BorderThickness" Value="0,1,0,0" />
-            <Setter Property="BorderBrush" Value="{DynamicResource ChromeBorder}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Border}" />
             <Setter Property="Padding" Value="12,4" />
+        </Style>
+
+        <!-- 状态栏文字用次级色：它不承载交互，符合"次级色只用于非交互文字"的规则 -->
+        <Style Selector="Border.statusbar TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="FontSize" Value="11" />
         </Style>
 
         <!--
@@ -51,40 +103,134 @@
         -->
         <Style Selector="Grid.markdown-document">
             <Setter Property="Margin" Value="0,0,12,0" />
+            <!--
+              同时把文档底色对齐到 Surface：MarkView 的 GitHub 主题给文档区画了 #0D1117，
+              与编辑器的 #121314 差一档，双栏下能看出一道分界。
+              只改这一层的背景，不动它内部的 Markdown 元素样式（那些属于包内主题）。
+            -->
+            <Setter Property="Background" Value="{DynamicResource Surface}" />
         </Style>
 
-        <!-- 文档标签：非活动态半透明，活动态用主题强调色底 -->
+        <!-- ================= 工具栏 ================= -->
+
+        <!--
+          工具栏按钮：方角、无边框、悬停用半透明叠加。
+          文字用 TextPrimary —— 交互行不用次级色（叠加后对比度会掉到 4.5 以下）。
+        -->
+        <Style Selector="Button.tool">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.tool:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource StateHover}" />
+        </Style>
+        <Style Selector="Button.tool:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource StatePressed}" />
+        </Style>
+
+        <!-- 工具栏的分组竖线 -->
+        <Style Selector="Border.toolsep">
+            <Setter Property="Width" Value="1" />
+            <Setter Property="Margin" Value="4,3" />
+            <Setter Property="Background" Value="{DynamicResource Border}" />
+        </Style>
+
+        <!-- 切换按钮：选中态用强调色，替换 Fluent 默认蓝 -->
+        <Style Selector="ToggleButton.tool">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="ToggleButton.tool:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource StateHover}" />
+        </Style>
+        <Style Selector="ToggleButton.tool:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource StatePressed}" />
+        </Style>
+        <Style Selector="ToggleButton.tool:checked /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource Accent}" />
+        </Style>
+        <Style Selector="ToggleButton.tool:checked /template/ ContentPresenter TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource AccentForeground}" />
+        </Style>
+        <Style Selector="ToggleButton.tool:checked:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource Accent}" />
+            <Setter Property="Opacity" Value="0.9" />
+        </Style>
+
+        <!-- ================= 标签栏 ================= -->
+
+        <!--
+          VS Code 手法：非活动标签与 chrome 同底色，活动标签与内容区同色，
+          视觉上"活动标签是内容的一部分"，接缝消失。
+          标签之间不留间距、不加圆角。
+        -->
         <Style Selector="Border.tab">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Padding" Value="2,2,2,2" />
-            <Setter Property="Margin" Value="0,0,2,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+        </Style>
+        <Style Selector="Border.tab:pointerover">
+            <Setter Property="Background" Value="{DynamicResource StateHover}" />
         </Style>
         <Style Selector="Border.tab.active">
-            <Setter Property="Background" Value="{DynamicResource PreviewBackground}" />
+            <Setter Property="Background" Value="{DynamicResource Surface}" />
+            <Setter Property="BorderThickness" Value="0,1,0,0" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
         </Style>
         <Style Selector="Border.tab Button.tab-title">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="Padding" Value="12,6" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Opacity" Value="0.7" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
         <Style Selector="Border.tab.active Button.tab-title">
-            <Setter Property="Opacity" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
-
-        <!-- 侧栏页签（文件 / 大纲） -->
-        <Style Selector="Button.side-tab">
+        <Style Selector="Border.tab Button.tab-close">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="10,4" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="Opacity" Value="0.65" />
+            <Setter Property="Padding" Value="5,2" />
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
+        <!-- 原来这里是硬编码 #40FF0000（纯红 25%），深色下叠成 #5C1C1C 几乎看不出 -->
+        <Style Selector="Border.tab Button.tab-close:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource Danger}" />
+            <Setter Property="Background" Value="{DynamicResource StateHover}" />
+        </Style>
+
+        <!-- ================= 侧栏 ================= -->
+
+        <!-- 侧栏页签：活动态用强调色下划线，而不是只靠 Opacity -->
+        <Style Selector="Button.side-tab">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.side-tab:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
         <Style Selector="Button.side-tab.active">
-            <Setter Property="Opacity" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style Selector="Button.side-icon">
@@ -92,19 +238,68 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="6,2" />
             <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
-        <Style Selector="Border.tab Button.tab-close">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="5,2" />
-            <Setter Property="FontSize" Value="10" />
-            <Setter Property="Opacity" Value="0.5" />
-            <Setter Property="Cursor" Value="Hand" />
+        <Style Selector="Button.side-icon:pointerover">
+            <Setter Property="Background" Value="{DynamicResource StateHover}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
-        <Style Selector="Border.tab Button.tab-close:pointerover">
-            <Setter Property="Opacity" Value="1" />
-            <Setter Property="Background" Value="#40FF0000" />
+
+        <!-- 侧栏说明文字（路径 / 空状态）用次级色，它们不承载交互 -->
+        <Style Selector="TextBlock.hint">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="TextBlock.empty">
+            <Setter Property="Foreground" Value="{DynamicResource TextDisabled}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+
+        <!-- 目录树与大纲：行悬停 + 选中态，替代 Fluent 默认蓝 -->
+        <Style Selector="TreeViewItem">
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Margin" Value="0,1" />
+        </Style>
+        <Style Selector="TreeViewItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource StateHover}" />
+        </Style>
+        <Style Selector="TreeViewItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="{DynamicResource StateSelected}" />
+        </Style>
+        <Style Selector="ListBoxItem">
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Margin" Value="0,1" />
+        </Style>
+        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource StateHover}" />
+        </Style>
+        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource StateSelected}" />
+        </Style>
+
+        <!-- ================= 分隔条 ================= -->
+
+        <!--
+          GridSplitter 的"抓握指示"默认用系统灰（实测深色主题下是 #858585，
+          比两侧 #121314 亮得多，像一条刺眼的亮线）。这里显式压到 BorderStrong，
+          与整体 chrome 一致；悬停时才提到 Accent 表示可拖动。
+        -->
+        <Style Selector="GridSplitter">
+            <Setter Property="Background" Value="{DynamicResource Border}" />
+        </Style>
+        <Style Selector="GridSplitter:pointerover">
+            <Setter Property="Background" Value="{DynamicResource Accent}" />
+        </Style>
+
+        <!-- ================= 编辑器与预览 ================= -->
+
+        <!--
+          编辑器与预览统一用 Surface：深色下不再是一个 #1E1E1E 一个 #0D1117。
+          两者之间靠 1px 分隔条区分即可。
+        -->
+        <Style Selector="Border.pane">
+            <Setter Property="Background" Value="{DynamicResource Surface}" />
         </Style>
     </Application.Styles>
 </Application>

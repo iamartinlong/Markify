@@ -104,6 +104,37 @@ public static class SelfTest
             return $"styles={app.Styles.Count}, themeVariant={app.ActualThemeVariant}";
         });
 
+        // 设计令牌必须同时存在于明暗两套主题字典里。
+        // 缺一个键时 Avalonia 不会报错，只是该属性回退到默认值——
+        // 深色主题下会出现"某个面板仍是浅色"这类不明显但难查的问题。
+        Check("theme-tokens", () =>
+        {
+            var app = Avalonia.Application.Current ?? throw new InvalidOperationException("Application.Current is null");
+            string[] required =
+            [
+                "Surface", "SurfaceChrome", "SurfaceSunken",
+                "Border", "BorderStrong",
+                "TextPrimary", "TextSecondary", "TextDisabled",
+                "Accent", "AccentForeground", "Danger",
+                "StateHover", "StatePressed", "StateSelected",
+            ];
+
+            var missing = new List<string>();
+            foreach (var key in required)
+            {
+                foreach (var variant in new[] { Avalonia.Styling.ThemeVariant.Light, Avalonia.Styling.ThemeVariant.Dark })
+                {
+                    if (!app.TryGetResource(key, variant, out _))
+                        missing.Add($"{variant.Key}:{key}");
+                }
+            }
+
+            if (missing.Count > 0)
+                throw new InvalidOperationException("missing tokens: " + string.Join(", ", missing));
+
+            return $"tokens={required.Length}x2";
+        });
+
         Check("editor-loaded", () =>
         {
             var editor = window.FindControl<TextEditor>("Editor") ?? throw new InvalidOperationException("Editor not found");
