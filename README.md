@@ -129,7 +129,7 @@ CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提�
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/todo.md](docs/todo.md) | **待办与下一步计划**（接手先看这个） |
+| [docs/todo.md](docs/todo.md) | **现状与路线图**（接手先看这个） |
 | [docs/worklog.md](docs/worklog.md) | 已完成工作、决策记录与被推翻的判断 |
 | [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md) | 40 条踩坑与排查手法 |
 | [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md) | 选型依据与架构 |
@@ -155,6 +155,10 @@ dotnet run --project tests/Markify.Tests
 - 导出 HTML 的 `<details>` 块不支持嵌套（MarkView 的 details 节点无法通过 Markdig 默认渲染器输出，需自行抽取还原）
 - 替换功能依赖 AvaloniaEdit 的 SearchPanel，仅在源码编辑区生效（预览区暂不支持查找）
 - 所有标签共用一个编辑器控件（切换 `TextDocument`）。这是为控制开销有意为之，代价是标签之间共享语法高亮配置与查找面板状态
+- 不记忆上次打开的文件夹，也没有「最近打开的文件」——每次启动需重新选目录
+- 单击目录树中的文件会直接新建标签，没有 VS Code 那种「预览态」临时标签
+
+> 这些限制与 [docs/todo.md](docs/todo.md) §2 的路线图条目对应，但该路线图**均未排期**。
 
 ## NativeAOT
 
