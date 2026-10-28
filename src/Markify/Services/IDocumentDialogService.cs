@@ -24,4 +24,7 @@ public interface IDocumentDialogService
 
     /// <summary>导出完成后的提示（失败时用于显示原因）。</summary>
     Task ShowMessageAsync(string title, string message);
+
+    /// <summary>把文本写入系统剪贴板。</summary>
+    Task SetClipboardTextAsync(string text);
 }

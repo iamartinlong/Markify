@@ -139,6 +139,37 @@ public class WorkspaceTests
     }
 
     [Fact]
+    public void Document_TabToolTip_ShowsFullPathWhenSaved()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "markify-tip-" + Guid.NewGuid().ToString("N") + ".md");
+        var doc = NewDoc("# x", path);
+
+        // 悬浮提示要给出完整路径，而不是仅文件名
+        Assert.Equal(path, doc.TabToolTip);
+    }
+
+    [Fact]
+    public void Document_TabToolTip_ExplainsWhenUnsaved()
+    {
+        var doc = NewDoc("# x", path: null);
+
+        // 未保存的新文档没有路径，提示应说明原因而不是显示空白
+        Assert.Contains("尚未保存", doc.TabToolTip);
+        Assert.DoesNotContain(doc.TabToolTip, Path.DirectorySeparatorChar.ToString());
+    }
+
+    [Fact]
+    public void Document_TabToolTip_FollowsSaveAs()
+    {
+        var doc = NewDoc("# x", path: null);
+        var newPath = Path.Combine(Path.GetTempPath(), "markify-tip2-" + Guid.NewGuid().ToString("N") + ".md");
+
+        doc.FilePath = newPath;
+
+        Assert.Equal(newPath, doc.TabToolTip);
+    }
+
+    [Fact]
     public void Document_CountWords_MatchesLegacyBehaviour()
     {
         // 与重构前的统计口径保持一致：中文按字、英文按词

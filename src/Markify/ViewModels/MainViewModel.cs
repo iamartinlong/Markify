@@ -87,6 +87,65 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsOutlineVisible { get; set; }
 
+    // ---------- 文件夹 / 目录树 ----------
+
+    /// <summary>当前打开的文件夹（根节点）；null 表示未打开任何文件夹。</summary>
+    [ObservableProperty]
+    public partial FileTreeNode? FolderRoot { get; set; }
+
+    [ObservableProperty]
+    public partial string? FolderPath { get; set; }
+
+    /// <summary>侧栏显示哪个页签：true = 文件树，false = 大纲。</summary>
+    [ObservableProperty]
+    public partial bool IsFileTreeActive { get; set; } = true;
+
+    /// <summary>大纲页签是否为活动态（供样式绑定）。</summary>
+    public bool IsOutlineActive => !IsFileTreeActive;
+
+    [RelayCommand]
+    private void ShowFileTree() => IsFileTreeActive = true;
+
+    [RelayCommand]
+    private void ShowOutline() => IsFileTreeActive = false;
+
+    partial void OnIsFileTreeActiveChanged(bool value) => OnPropertyChanged(nameof(IsOutlineActive));
+
+    /// <summary>请求用户选择文件夹（由视图弹系统对话框）。</summary>
+    public event EventHandler? OpenFolderRequested;
+
+    [RelayCommand]
+    private void OpenFolder() => OpenFolderRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>设置根文件夹并加载第一层。目录无效时给出状态提示而不是抛异常。</summary>
+    public void SetFolder(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            StatusMessage = "文件夹不存在或无法访问";
+            return;
+        }
+
+        var root = FileTreeNode.ForDirectory(path);
+        root.EnsureChildrenLoaded();
+        // 默认展开根节点，用户一眼能看到内容
+        root.IsExpanded = true;
+
+        FolderRoot = root;
+        FolderPath = path;
+        IsFileTreeActive = true;
+        IsOutlineVisible = true;   // 打开文件夹时自动显示侧栏，否则用户看不到树
+        StatusMessage = $"已打开文件夹：{path}";
+    }
+
+    [RelayCommand]
+    private void CloseFolder()
+    {
+        FolderRoot = null;
+        FolderPath = null;
+        StatusMessage = "已关闭文件夹";
+    }
+
     public bool HasDocuments => Documents.Count > 0;
 
     public bool CanCloseTab => Documents.Count > 1;
@@ -260,6 +319,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void PreviousTab() => CycleTab(-1);
 
+    [RelayCommand]
     private void CycleTab(int delta)
     {
         if (Documents.Count <= 1 || ActiveDocument is null)
@@ -279,6 +339,139 @@ public partial class MainViewModel : ObservableObject
     {
         if (doc is not null)
             ActiveDocument = doc;
+    }
+
+    // ---------- 标签右键菜单 ----------
+
+    private bool CanBatchClose(DocumentViewModel? doc) => doc is not null && Documents.Count > 1;
+
+    [RelayCommand]
+    private async Task CloseTabsToLeftAsync(DocumentViewModel? doc)
+    {
+        if (!CanBatchClose(doc) || doc is null)
+            return;
+
+        var index = Documents.IndexOf(doc);
+        if (index <= 0)
+            return;
+
+        // 从右往左删，避免删除时索引错位。
+        for (var i = index - 1; i >= 0; i--)
+        {
+            if (!await TryCloseForBatchAsync(Documents[i]))
+                return;   // 用户在确认框里取消了，停止后续关闭
+        }
+    }
+
+    [RelayCommand]
+    private async Task CloseTabsToRightAsync(DocumentViewModel? doc)
+    {
+        if (!CanBatchClose(doc) || doc is null)
+            return;
+
+        var index = Documents.IndexOf(doc);
+        if (index < 0 || index >= Documents.Count - 1)
+            return;
+
+        // 每次都删同一个位置，等价于删掉右侧全部。
+        while (index + 1 < Documents.Count)
+        {
+            if (!await TryCloseForBatchAsync(Documents[index + 1]))
+                return;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CloseOtherTabsAsync(DocumentViewModel? doc)
+    {
+        if (!CanBatchClose(doc) || doc is null)
+            return;
+
+        foreach (var other in Documents.Where(d => !ReferenceEquals(d, doc)).ToList())
+        {
+            if (!await TryCloseForBatchAsync(other))
+                return;
+        }
+
+        ActiveDocument = doc;
+    }
+
+    /// <summary>批量关闭时的单个文档处理：脏文档先确认。</summary>
+    private async Task<bool> TryCloseForBatchAsync(DocumentViewModel doc)
+    {
+        if (doc.IsModified && !await ConfirmDiscardAsync(doc))
+            return false;
+
+        CloseDocumentCore(doc);
+        return true;
+    }
+
+    /// <summary>
+    /// 用系统文件管理器打开文档所在目录（尽量选中该文件）。
+    /// 由视图实现，因为涉及平台差异与进程启动。
+    /// </summary>
+    public event EventHandler<string>? RevealInFileManagerRequested;
+
+    [RelayCommand]
+    private void RevealInFileManager(DocumentViewModel? doc)
+    {
+        if (doc?.FilePath is not { Length: > 0 } path)
+        {
+            StatusMessage = "当前文档尚未保存，没有所在文件夹";
+            return;
+        }
+
+        RevealInFileManagerRequested?.Invoke(this, path);
+        StatusMessage = $"已打开 {Path.GetFileName(path)} 所在文件夹";
+    }
+
+    /// <summary>复制完整路径到剪贴板。未保存的新文档没有路径可复制。</summary>
+    [RelayCommand]
+    private async Task CopyFilePathAsync(DocumentViewModel? doc)
+    {
+        if (doc?.FilePath is not { Length: > 0 } path)
+        {
+            StatusMessage = "当前文档尚未保存，没有文件路径";
+            return;
+        }
+
+        if (Dialogs is null)
+            return;
+
+        await Dialogs.SetClipboardTextAsync(path);
+        StatusMessage = $"已复制路径：{path}";
+    }
+
+    /// <summary>保存指定标签（右键菜单用，区别于工具栏只存当前标签）。</summary>
+    [RelayCommand]
+    private async Task SaveDocumentByIdAsync(DocumentViewModel? doc)
+    {
+        if (doc is null)
+            return;
+
+        if (string.IsNullOrEmpty(doc.FilePath))
+        {
+            await SaveAsDocumentAsync(doc);
+            return;
+        }
+
+        await SaveDocumentAsync(doc);
+    }
+
+    [RelayCommand]
+    private async Task SaveAsDocumentAsync(DocumentViewModel? doc)
+    {
+        if (Dialogs is null || doc is null)
+            return;
+
+        var path = await Dialogs.PickSaveFileAsync(doc.FilePath);
+        if (path is null)
+            return;
+
+        if (string.IsNullOrEmpty(Path.GetExtension(path)))
+            path += ".md";
+
+        await SaveDocumentAsync(doc, path);
     }
 
     // ---------- 保存 ----------

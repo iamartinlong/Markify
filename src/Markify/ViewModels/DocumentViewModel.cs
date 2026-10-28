@@ -120,6 +120,15 @@ public partial class DocumentViewModel : ObservableObject, IDisposable
             ? (_untitledName ?? "未命名.md")
             : Path.GetFileName(FilePath);
 
+    /// <summary>
+    /// 标签的悬浮提示：显示完整路径，方便确认打开的是哪个文件。
+    /// 未保存的新文档没有路径，给出可操作的提示而不是空白。
+    /// </summary>
+    public string TabToolTip =>
+        string.IsNullOrEmpty(FilePath)
+            ? $"{DocumentName}（尚未保存，无文件路径）"
+            : FilePath;
+
     /// <summary>标签页上显示的文字（带修改标记）。</summary>
     public string TabTitle =>
         $"{DocumentName}{(IsModified ? " •" : string.Empty)}";
@@ -242,6 +251,7 @@ public partial class DocumentViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(DocumentName));
         OnPropertyChanged(nameof(TabTitle));
+        OnPropertyChanged(nameof(TabToolTip));
     }
 
     partial void OnCaretLineChanged(int value) => OnPropertyChanged(nameof(CaretDisplay));

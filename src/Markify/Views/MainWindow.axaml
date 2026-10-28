@@ -21,12 +21,14 @@
 
     <Window.Resources>
         <views:HeadingLevelToMarginConverter x:Key="LevelToMargin" />
+        <views:FolderIconConverter x:Key="FolderIcon" />
     </Window.Resources>
 
     <Window.KeyBindings>
         <KeyBinding Gesture="Ctrl+T" Command="{Binding NewDocumentCommand}" />
         <KeyBinding Gesture="Ctrl+N" Command="{Binding NewDocumentCommand}" />
         <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenDocumentCommand}" />
+        <KeyBinding Gesture="Ctrl+Shift+O" Command="{Binding OpenFolderCommand}" />
         <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
         <KeyBinding Gesture="Ctrl+Shift+P" Command="{Binding TogglePreviewCommand}" />
@@ -47,6 +49,8 @@
             <MenuItem Header="文件(_F)">
                 <MenuItem Header="新建" Command="{Binding NewDocumentCommand}" InputGesture="Ctrl+N" />
                 <MenuItem Header="打开…" Command="{Binding OpenDocumentCommand}" InputGesture="Ctrl+O" />
+                <MenuItem Header="打开文件夹…" Command="{Binding OpenFolderCommand}" InputGesture="Ctrl+Shift+O" />
+                <MenuItem Header="关闭文件夹" Command="{Binding CloseFolderCommand}" />
                 <Separator />
                 <MenuItem Header="保存" Command="{Binding SaveCommand}" InputGesture="Ctrl+S" />
                 <MenuItem Header="另存为…" Command="{Binding SaveAsCommand}" InputGesture="Ctrl+Shift+S" />
@@ -107,7 +111,44 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:DocumentViewModel">
                             <Border Classes="tab" Classes.active="{Binding IsActive}"
-                                    CornerRadius="4,4,0,0">
+                                    CornerRadius="4,4,0,0"
+                                    ToolTip.Tip="{Binding TabToolTip}">
+                                <Border.ContextMenu>
+                                    <ContextMenu>
+                                        <!--
+                                          菜单项的命令都从 ItemsControl 的 DataContext 取（主 ViewModel），
+                                          CommandParameter 传当前标签，因此右键菜单作用于被右键的那个标签，
+                                          而不是当前活动标签。
+                                        -->
+                                        <MenuItem Header="保存"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SaveDocumentByIdCommand}"
+                                                  CommandParameter="{Binding}" />
+                                        <MenuItem Header="另存为…"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SaveAsDocumentCommand}"
+                                                  CommandParameter="{Binding}" />
+                                        <Separator />
+                                        <MenuItem Header="打开所在文件夹"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).RevealInFileManagerCommand}"
+                                                  CommandParameter="{Binding}" />
+                                        <MenuItem Header="复制文件路径"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CopyFilePathCommand}"
+                                                  CommandParameter="{Binding}" />
+                                        <Separator />
+                                        <MenuItem Header="关闭左侧标签"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseTabsToLeftCommand}"
+                                                  CommandParameter="{Binding}" />
+                                        <MenuItem Header="关闭右侧标签"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseTabsToRightCommand}"
+                                                  CommandParameter="{Binding}" />
+                                        <MenuItem Header="关闭其他标签"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseOtherTabsCommand}"
+                                                  CommandParameter="{Binding}" />
+                                        <Separator />
+                                        <MenuItem Header="关闭"
+                                                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).CloseTabCommand}"
+                                                  CommandParameter="{Binding}" />
+                                    </ContextMenu>
+                                </Border.ContextMenu>
                                 <StackPanel Orientation="Horizontal" Spacing="4">
                                     <Button Classes="tab-title"
                                             Content="{Binding TabTitle}"
@@ -149,9 +190,48 @@
                     BorderBrush="{DynamicResource ChromeBorder}"
                     IsVisible="{Binding IsOutlineVisible}">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="大纲" Margin="12,10,12,6"
-                               FontWeight="SemiBold" Opacity="0.75" />
+                    <!-- 侧栏页签：文件树 / 大纲，同一时刻只显示一个 -->
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="2" Margin="8,8,8,4">
+                        <Button Content="文件" Classes="side-tab"
+                                Classes.active="{Binding IsFileTreeActive}"
+                                Command="{Binding ShowFileTreeCommand}" />
+                        <Button Content="大纲" Classes="side-tab"
+                                Classes.active="{Binding IsOutlineActive}"
+                                Command="{Binding ShowOutlineCommand}" />
+                        <Button Content="📂" Classes="side-icon" ToolTip.Tip="打开文件夹…"
+                                Command="{Binding OpenFolderCommand}"
+                                HorizontalAlignment="Right" />
+                    </StackPanel>
+
+                    <!-- 文件树 -->
+                    <DockPanel IsVisible="{Binding IsFileTreeActive}">
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding FolderPath}"
+                                   Margin="12,2,12,6" FontSize="11" Opacity="0.6"
+                                   TextTrimming="CharacterEllipsis"
+                                   IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                        <TextBlock DockPanel.Dock="Top" Text="尚未打开文件夹"
+                                   Margin="12,8" Opacity="0.55" FontSize="12"
+                                   IsVisible="{Binding FolderRoot, Converter={x:Static ObjectConverters.IsNull}}" />
+                        <TreeView x:Name="FileTree"
+                                  ItemsSource="{Binding FolderRoot.Children}"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  IsVisible="{Binding FolderPath, Converter={x:Static ObjectConverters.IsNotNull}}">
+                            <TreeView.ItemTemplate>
+                                <TreeDataTemplate ItemsSource="{Binding Children}"
+                                                  x:DataType="vm:FileTreeNode">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="{Binding IsDirectory, Converter={StaticResource FolderIcon}}" />
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </TreeDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
+                    </DockPanel>
+
+                    <!-- 大纲 -->
                     <ListBox x:Name="OutlineList"
+                             IsVisible="{Binding IsOutlineActive}"
                              ItemsSource="{Binding ActiveDocument.Outline}"
                              SelectedItem="{Binding ActiveDocument.SelectedHeading}"
                              Background="Transparent"

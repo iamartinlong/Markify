@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
@@ -63,6 +65,10 @@ public partial class MainWindow : Window, IDocumentDialogService
         LayoutUpdated += OnLayoutUpdated;
         OutlineList.SelectionChanged += OnOutlineSelectionChanged;
 
+        // 文件树：单击预览、双击常驻打开（与 VS Code 一致，避免误开一堆标签）
+        FileTree.SelectionChanged += OnFileTreeSelectionChanged;
+        FileTree.DoubleTapped += OnFileTreeDoubleTapped;
+
         // 首次显示时按 ViewModel 的初始状态排一次布局（上下/左右、是否显示预览）。
         Loaded += (_, _) => ApplyPaneLayout();
 
@@ -100,6 +106,8 @@ public partial class MainWindow : Window, IDocumentDialogService
             _viewModel.ActiveDocumentChanged -= OnActiveDocumentChanged;
             _viewModel.FindRequested -= OnFindRequested;
             _viewModel.ReplaceRequested -= OnReplaceRequested;
+            _viewModel.RevealInFileManagerRequested -= OnRevealInFileManagerRequested;
+            _viewModel.OpenFolderRequested -= OnOpenFolderRequested;
             _viewModel.ExternalChangePromptRequested -= OnExternalChangePromptRequested;
             _viewModel.DiscardPromptRequested -= OnDiscardPromptRequested;
         }
@@ -113,6 +121,8 @@ public partial class MainWindow : Window, IDocumentDialogService
         _viewModel.ActiveDocumentChanged += OnActiveDocumentChanged;
         _viewModel.FindRequested += OnFindRequested;
         _viewModel.ReplaceRequested += OnReplaceRequested;
+        _viewModel.RevealInFileManagerRequested += OnRevealInFileManagerRequested;
+        _viewModel.OpenFolderRequested += OnOpenFolderRequested;
         _viewModel.ExternalChangePromptRequested += OnExternalChangePromptRequested;
         _viewModel.DiscardPromptRequested += OnDiscardPromptRequested;
 
@@ -183,8 +193,37 @@ public partial class MainWindow : Window, IDocumentDialogService
         }
     }
 
-    // ---------- 大纲导航 ----------
+    // ---------- 文件树 ----------
 
+    /// <summary>
+    /// 单击 Markdown 文件即打开（预览）。文件夹不响应，交给 TreeView 自己的展开逻辑。
+    /// 已打开的文档由 OpenPathAsync 内部切换到对应标签，不会重复打开。
+    /// </summary>
+    private async void OnFileTreeSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_viewModel is null || FileTree.SelectedItem is not FileTreeNode node)
+            return;
+
+        if (node.IsDirectory)
+            return;
+
+        await _viewModel.OpenPathAsync(node.FullPath);
+    }
+
+    /// <summary>
+    /// 双击：当前实现里单击已经打开文件，双击只是保持该标签处于活动状态，
+    /// 并为将来"单击仅预览（临时标签）、双击转常驻"留出钩子。
+    /// </summary>
+    private void OnFileTreeDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (FileTree.SelectedItem is not FileTreeNode node || node.IsDirectory)
+            return;
+
+        // 文件夹节点双击切换展开状态，由 TreeView 处理；文件节点无需额外动作。
+        e.Handled = true;
+    }
+
+    // ---------- 大纲导航 ----------
     private void OnOutlineSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (OutlineList.SelectedItem is not MarkdownHeading heading)
@@ -695,8 +734,76 @@ public partial class MainWindow : Window, IDocumentDialogService
         return file?.TryGetLocalPath();
     }
 
-    public Task ShowMessageAsync(string title, string message)
+    public async Task SetClipboardTextAsync(string text)
     {
+        var clipboard = Clipboard;
+        if (clipboard is null)
+            return;
+
+        // Avalonia 12 的 IClipboard 用 SetTextAsync（旧版是 SetText）
+        await clipboard.SetTextAsync(text);
+    }
+
+    /// <summary>选择文件夹并交给 ViewModel 建立目录树。</summary>
+    private async void OnOpenFolderRequested(object? sender, EventArgs e)
+    {
+        if (_viewModel is null)
+            return;
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "打开文件夹",
+            AllowMultiple = false,
+        });
+
+        if (folders.Count == 0)
+            return;
+
+        var path = folders[0].TryGetLocalPath();
+        if (path is null)
+            return;
+
+        _viewModel.SetFolder(path);
+    }
+
+    /// <summary>
+    /// 在资源管理器里打开文档所在目录并选中该文件。
+    /// explorer.exe /select,"path" 是 Windows 上的标准做法，失败时退回到只打开目录。
+    /// </summary>
+    private void OnRevealInFileManagerRequested(object? sender, string path)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    // 路径含空格时必须整体加引号；/select 与路径之间用逗号且不能有空格。
+                    Arguments = $"/select,\"{path}\"",
+                    UseShellExecute = true,
+                });
+                return;
+            }
+
+            // 非 Windows：打开所在目录（不支持选中单个文件）
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory))
+                Process.Start(new ProcessStartInfo { FileName = directory, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            StatusMessage($"无法打开文件夹：{ex.Message}");
+        }
+    }
+
+    private void StatusMessage(string message)
+    {
+        if (_viewModel is not null)
+            _viewModel.StatusMessage = message;
+    }
+
+    public Task ShowMessageAsync(string title, string message)    {
         var tcs = new TaskCompletionSource();
 
         var dialog = new Window
