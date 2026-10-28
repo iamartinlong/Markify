@@ -24,7 +24,7 @@
 - **导出 PDF** — 复用 HTML 排版，通过系统 Edge/Chrome 无头打印，中文正确嵌入
 - **查找替换** — `Ctrl+F` / `Ctrl+H`，支持大小写、整词、正则
 - **未保存保护** — 新建、打开、关闭标签、关闭窗口均会确认
-- **明暗主题** — 界面、编辑器、预览三者联动
+- **明暗主题** — 界面、编辑器、预览三者联动；共用一套语义化设计令牌（面/线/文字/状态），深浅切换无割裂
 - **拖放打开** / 命令行 `Markify doc.md`
 - **状态栏** — 光标行列、字数（中文按字计）、字符数、编码
 
@@ -131,6 +131,8 @@ CI 会重新生成图标并与仓库比对，防止改了生成器却忘记提�
 | --- | --- |
 | [docs/todo.md](docs/todo.md) | **现状与路线图**（接手先看这个） |
 | [docs/worklog.md](docs/worklog.md) | 已完成工作、决策记录与被推翻的判断 |
+| [docs/ui-optimization.md](docs/ui-optimization.md) | **UI 优化方案**（问题实测 + 设计令牌 + 三期计划，未实施） |
+| [docs/vscode-style-discussion.md](docs/vscode-style-discussion.md) | **是否做成 VS Code 风格**（三层拆解 + 空间账 + 决策建议） |
 | [docs/pitfalls-and-practices.md](docs/pitfalls-and-practices.md) | 40 条踩坑与排查手法 |
 | [docs/avalonia-markdown-client.md](docs/avalonia-markdown-client.md) | 选型依据与架构 |
 | [docs/logo.md](docs/logo.md) | 图标设计与替换步骤 |
